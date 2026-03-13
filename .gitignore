@@ -1,0 +1,7 @@
+__pycache__
+.vscode
+.venv
+.DS_Store
+.env
+config
+insta_news_cards
