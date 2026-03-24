@@ -1,3 +1,4 @@
+import json
 import os, ollama, requests, feedparser, textwrap
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
@@ -33,25 +34,43 @@ def get_headlines(limit=10):
     sources = {
         'Finance/Trade': 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114',
         'Geo-Politics': 'https://feeds.bbci.co.uk/news/world/rss.xml',
-        'Tech': 'https://techcrunch.com/feed/'
+        'Tech': 'https://techcrunch.com/feed/',
+
+        'Sports-Cricket': 'https://crickettimes.com/feed',
+        'Sports-Football': 'https://worldsoccer.com/feed',
+
+        'India': 'https://indianexpress.com/feed',
+
+        'AI': 'https://openai.com/blog/rss.xml',
+
+        'Innovation': 'https://newatlas.com/index.rss',
+
+        'Positive-News': 'https://www.goodnewsnetwork.org/feed'
     }
 
     category_source_mapping = {
         'Finance/Trade': 'CNBC',
         'Geo-Politics': 'BBC',
-        'Tech': 'TechCrunch'
+        'Tech': 'TechCrunch',
+        'Sports-Cricket': 'CricketTimes',
+        'Sports-Football': 'WorldSoccer',
+        'India': 'IndianExpress',
+        'Trending': 'TrendHunter',
+        'AI': 'OpenAI',
+        'Innovation': 'NewAtlas',
+        'Positive-News': 'GoodNewsNetwork'
     }
 
     for category, url in sources.items():
         try:
-            print(f"🔍 Fetching {category}...")
+            print(f"🔍 Fetching {category}, {url}...")
             response = requests.get(url, headers=HEADER, timeout=10)
             
             # Check if the request was successful
             if response.status_code == 200:
                 feed = feedparser.parse(response.content) # Parse the content of the response
                 
-                for entry in feed.entries[:4]: # Grab a few from each category
+                for entry in feed.entries[:1]: # Grab one from each category
                     headlines.append({
                         "title": entry.title,
                         "source": category_source_mapping[category],
@@ -76,7 +95,7 @@ def get_description(url, headline):
                 text = group_elem.get_text(separator='', strip=True)
                 return text
             else:
-                main = soup.find("main")
+                main = soup.find("main") or soup.find(id="pcl-full-content") or soup.find(class_="td-post-content")
                 article = []
                 if main:
                     for p in main.find_all("p"):
@@ -102,13 +121,20 @@ def get_description(url, headline):
 
 def summarize_news_for_image(headline, news_description):
     """Summarizes headline using local Ollama."""
-    prompt = f"Summarize this news headline and description into a one-line punchy sentence for Instagram with one most suitable hashtag at the end (max 25 words). News Headline: {headline}; News Description: {news_description}"
+    prompt = f"""
+    Summarize the news headline and description into a one-line, punchy Instagram caption (max 25 words) ending with a single hashtag. 
+    Return your answer only inside <description> tags. 
+    News Headline: {headline} 
+    News Description: {news_description}
+    Format: <description>your summary with hashtag here</description>
+    """
+    
     response = ollama.generate(model=OLLAMA_MODEL, prompt=prompt)
-    summary = response['response'].strip().replace('"', '')
+    summary = response['response'].split('<description>')[1].split('</description>')[0].strip()
     if "one-line punchy" in summary:
         print("Found one-line punchy...")
-        summary = summary.replace("Here is one-line puncy sentence for Instagram with one suitable hashtag: ", "").stip()
-        summary = summary.replace("Here's a one-line punchy sentence for Instagram:", "").stip()
+        summary = summary.replace("Here is one-line punchy sentence for Instagram with one suitable hashtag: ", "").strip()
+        summary = summary.replace("Here's a one-line punchy sentence for Instagram:", "").strip()
     hashtag = ""
     match = re.search(r'#[a-zA-Z0-9]+', summary)
     if match:
@@ -208,6 +234,11 @@ def write_description(news_summaries):
         for summary in news_summaries:
             # f.write(f"{summary['index']+1} - {summary['hashtags']} - source: ${summary['news_source']}\n")
             f.write(f"{summary['hashtag']} ")
+        f.write("\n\n Sources are provided below:\n")
+        for summary in news_summaries:
+            f.write(f"\n{summary['index']+1}. ${summary['source']}")
+    with open(f"{IMAGE_DIR}/news_summaries.json", "w", encoding="utf-8") as f:
+        f.write(json.dumps(news_summaries, ensure_ascii=False, indent=2))
 
 def generate_post():
     print("🚀 Collecting news...")
@@ -223,8 +254,10 @@ def generate_post():
             create_pro_image(i+1, news["title"], news_summary_for_image, news["source"])
             news_summaries.append({
                 "index": i,
-                "news_source": news["link"],
-                "hashtag": hashtag
+                "headline": news["title"],
+                "summary": news_summary_for_image,
+                "hashtag": hashtag,
+                "source": news["link"],
             })
         except Exception as e:
             print(f"Error while summarizing story for headline: ${news} - {e}")
