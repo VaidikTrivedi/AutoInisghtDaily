@@ -236,7 +236,7 @@ def write_description(news_summaries):
             f.write(f"{summary['hashtag']} ")
         f.write("\n\n Sources are provided below:\n")
         for summary in news_summaries:
-            f.write(f"\n{summary['index']+1}. ${summary['source']}")
+            f.write(f"\n{summary['index']+1}. {summary['source']}")
     with open(f"{IMAGE_DIR}/news_summaries.json", "w", encoding="utf-8") as f:
         f.write(json.dumps(news_summaries, ensure_ascii=False, indent=2))
 
