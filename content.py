@@ -13,6 +13,24 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL") or "llama3"
 FONT_REG_PATH = Path(os.getenv("FONT_REG_PATH") or "resources/Montserrat-Regular.ttf")
 FONT_BOLD_PATH = Path(os.getenv("FONT_BOLD_PATH") or "resources/Montserrat-Bold.ttf")
 
+# Token tracking
+stats = {
+    "total_prompt_tokens": 0,
+    "total_eval_tokens": 0,
+    "total_duration_ns": 0
+}
+
+def log_ollama_usage(response):
+    prompt_tokens = getattr(response, 'prompt_eval_count', 0)
+    eval_tokens = getattr(response, 'eval_count', 0)
+    duration = getattr(response, 'total_duration', 0)
+    
+    stats["total_prompt_tokens"] += prompt_tokens
+    stats["total_eval_tokens"] += eval_tokens
+    stats["total_duration_ns"] += duration
+    
+    print(f"📊 [Ollama Stats] Prompt: {prompt_tokens}, Eval: {eval_tokens}, Total: {prompt_tokens + eval_tokens} tokens")
+
 HEADER = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 }
@@ -130,6 +148,7 @@ def summarize_news_for_image(headline, news_description):
     """
     
     response = ollama.generate(model=OLLAMA_MODEL, prompt=prompt)
+    log_ollama_usage(response)
     summary = response['response'].split('<description>')[1].split('</description>')[0].strip()
     if "one-line punchy" in summary:
         print("Found one-line punchy...")
@@ -150,6 +169,7 @@ def get_hashtags(headline, news_description):
     """Summarizes headline using local Ollama."""
     prompt = f"Provide a most suitable and catchy hashtag accoding to the news (Just provide hashtags, no text at all). News Headline: {headline}; News Description: {news_description}"
     response = ollama.generate(model=OLLAMA_MODEL, prompt=prompt)
+    log_ollama_usage(response)
     summary = response['response'].strip().replace('"', '')
     if "I need the actual headline" in summary:
         summary = ""
@@ -161,6 +181,7 @@ def get_safe_style(headline):
     prompt = f"Categorize this news: '{headline}'. Pick exactly one: finance, tech, politics, or general. Return ONLY the word."
     try:
         response = ollama.generate(model='llama3', prompt=prompt)
+        log_ollama_usage(response)
         category = response['response'].strip().lower()
         # Fallback if category is weird
         return THEMES.get(category, THEMES["general"])
@@ -263,6 +284,14 @@ def generate_post():
             print(f"Error while summarizing story for headline: ${news} - {e}")
 
     write_description(news_summaries)
+
+    print("\n" + "="*40)
+    print("📈 FINAL OLLAMA TOKEN USAGE SUMMARY")
+    print(f"Total Prompt Tokens:   {stats['total_prompt_tokens']}")
+    print(f"Total Response Tokens: {stats['total_eval_tokens']}")
+    print(f"Total Tokens Used:     {stats['total_prompt_tokens'] + stats['total_eval_tokens']}")
+    print(f"Total Duration:        {stats['total_duration_ns'] / 1e9:.2f}s")
+    print("="*40)
 
     print(f"✅ Success! 10 images are ready in the '{IMAGE_DIR}' folder.")
 
