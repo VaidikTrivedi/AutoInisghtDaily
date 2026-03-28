@@ -9,9 +9,12 @@ import re
 # --- CONFIGURATION ---
 load_dotenv()
 IMAGE_DIR = os.getenv("IMAGE_DIR") or "insta_news_cards"
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL") or "llama3"
+OLLAMA_SUMMARY_MODEL = os.getenv("OLLAMA_SUMMARY_MODEL") or "llama3"
+OLLAMA_TRANSLATION_MODEL = os.getenv("OLLAMA_TRANSLATION_MODEL") or "translategemma"
 FONT_REG_PATH = Path(os.getenv("FONT_REG_PATH") or "resources/Montserrat-Regular.ttf")
 FONT_BOLD_PATH = Path(os.getenv("FONT_BOLD_PATH") or "resources/Montserrat-Bold.ttf")
+HINDI_FONT_REG_PATH = Path(os.getenv("HINDI_FONT_REG_PATH") or "resources/Hindi-Regular.ttf")
+HINDI_FONT_BOLD_PATH = Path(os.getenv("HINDI_FONT_BOLD_PATH") or "resources/Hindi-Bold.ttf")
 
 # Token tracking
 stats = {
@@ -147,7 +150,7 @@ def summarize_news_for_image(headline, news_description):
     Format: <description>your summary with hashtag here</description>
     """
     
-    response = ollama.generate(model=OLLAMA_MODEL, prompt=prompt)
+    response = ollama.generate(model=OLLAMA_SUMMARY_MODEL, prompt=prompt)
     log_ollama_usage(response)
     summary = response['response'].split('<description>')[1].split('</description>')[0].strip()
     if "one-line punchy" in summary:
@@ -168,7 +171,7 @@ def summarize_news_for_image(headline, news_description):
 def get_hashtags(headline, news_description):
     """Summarizes headline using local Ollama."""
     prompt = f"Provide a most suitable and catchy hashtag accoding to the news (Just provide hashtags, no text at all). News Headline: {headline}; News Description: {news_description}"
-    response = ollama.generate(model=OLLAMA_MODEL, prompt=prompt)
+    response = ollama.generate(model=OLLAMA_SUMMARY_MODEL, prompt=prompt)
     log_ollama_usage(response)
     summary = response['response'].strip().replace('"', '')
     if "I need the actual headline" in summary:
@@ -207,21 +210,24 @@ def fit_text_to_box(draw, text, font_path, start_size, max_w, max_h):
         current_size -= 4
     return ImageFont.load_default(), [text], 50
 
-def create_pro_image(index, headline, summary, source):
+def create_pro_image(index, headline, summary, source, language="en"):
     W, H = 1080, 1080
     theme = get_safe_style(headline)
     img = Image.new('RGB', (W, H), color=theme["bg"])
     draw = ImageDraw.Draw(img)
 
+    bold_font_language = HINDI_FONT_BOLD_PATH if language == "hi" else FONT_BOLD_PATH
+    regular_font_language = HINDI_FONT_REG_PATH if language == "hi" else FONT_REG_PATH
+
     # 1. Fit Headline (Upper 50% of image)
     head_font, head_lines, head_h = fit_text_to_box(
-        draw, headline.upper(), FONT_BOLD_PATH, 85, W*0.85, 450
+        draw, headline.upper(), bold_font_language, 85, W*0.85, 450
     )
 
     # 2. Fit Summary (Below Headline)
     # Give summary the remaining space minus some margins
     sum_font, sum_lines, sum_h = fit_text_to_box(
-        draw, summary, FONT_REG_PATH, 45, W*0.8, 300
+        draw, summary, regular_font_language, 45, W*0.8, 300
     )
 
     # 3. Drawing - Centered Vertical Layout
@@ -261,6 +267,20 @@ def write_description(news_summaries):
     with open(f"{IMAGE_DIR}/news_summaries.json", "w", encoding="utf-8") as f:
         f.write(json.dumps(news_summaries, ensure_ascii=False, indent=2))
 
+def translate_to_hindi(text):
+    prompt = f"""
+        You are a professional English (en) to Hindi (hi) translator. Your goal is to accurately convey the meaning and nuances of the original English text while adhering to Hindi grammar, vocabulary, and cultural sensitivities.
+        Produce only the Hindi translation, without any additional explanations or commentary. Please translate the following English text into Hindi: {text}
+        """
+    try:
+        response = ollama.generate(model=OLLAMA_TRANSLATION_MODEL, prompt=prompt)
+        log_ollama_usage(response)
+        translation = response['response'].strip()
+        return translation
+    except Exception as e:
+        print(f"Error while translating text to Hindi: {e}")
+        return None
+
 def generate_post():
     print("🚀 Collecting news...")
     news_list = get_headlines(10)
@@ -269,13 +289,21 @@ def generate_post():
     for i, news in enumerate(news_list):
         print(f"📝 Summarizing {i+1}/10: {news['title'][:50]}...")
         try:
-            news_description = get_description(news["link"], news["title"])
-            news_summary_for_image, hashtag = summarize_news_for_image(news["title"], news_description)
+            title = news["title"]
+            news_description = get_description(news["link"], title)
+            news_summary_for_image, hashtag = summarize_news_for_image(title, news_description)
+            title_in_hindi = translate_to_hindi(title)
+            news_summaries_for_image_in_hindi = translate_to_hindi(news_summary_for_image)
+            language = "en"
+            if news_summaries_for_image_in_hindi and title_in_hindi:
+                language = "hi"
+                title = title_in_hindi
+                news_summary_for_image = news_summaries_for_image_in_hindi
             print(f"🎨 Generating Image {i+1}...")
-            create_pro_image(i+1, news["title"], news_summary_for_image, news["source"])
+            create_pro_image(i+1, title, news_summary_for_image, news["source"], language)
             news_summaries.append({
                 "index": i,
-                "headline": news["title"],
+                "headline": title,
                 "summary": news_summary_for_image,
                 "hashtag": hashtag,
                 "source": news["link"],
@@ -293,7 +321,7 @@ def generate_post():
     print(f"Total Duration:        {stats['total_duration_ns'] / 1e9:.2f}s")
     print("="*40)
 
-    print(f"✅ Success! 10 images are ready in the '{IMAGE_DIR}' folder.")
+    print(f"✅ Success! images are ready in the '{IMAGE_DIR}' folder.")
 
 if __name__ == "__main__":
     generate_post()
