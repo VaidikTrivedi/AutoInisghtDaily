@@ -1,0 +1,118 @@
+import json
+import time
+import requests
+from openai import OpenAI
+
+class OpenRouterClient:
+    def __init__(self, api_key):
+        self.client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key,
+        )
+        self.api_key = api_key
+        self.prompt_tokens = 0
+        self.eval_tokens = 0
+        self.duration_ns = 0  # Initialize duration_ns to track response time
+
+    def logUsage(self):
+        return self.prompt_tokens, self.eval_tokens, self.prompt_tokens + self.eval_tokens, self.duration_ns
+    
+    def generateAIResponse(self, prompt, model):
+        start_time = time.perf_counter()
+        try:
+            client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=self.api_key,
+            )
+
+            completion = client.chat.completions.create(
+            extra_headers={
+                # "HTTP-Referer": "<YOUR_SITE_URL>", # Optional. Site URL for rankings on openrouter.ai.
+                "X-OpenRouter-Title": "https://itrivedi.com", # Optional. Site title for rankings on openrouter.ai.
+            },
+            # model="openai/gpt-5.2",
+            model="qwen/qwen3.6-plus:free", 
+            messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+            # print(completion.choices[0].message.content)
+            end_time = time.perf_counter()
+            self.duration_ns = (end_time - start_time) * 1e9  # Convert seconds to nanoseconds
+            self.prompt_tokens = completion.usage.prompt_tokens
+            self.eval_tokens = completion.usage.completion_tokens
+            return completion.choices[0].message.content
+        except Exception as e:
+            print(f"Error calling OpenRouter API: {e}")
+            return None
+        
+
+    def getAIImage(self, prompt, model):
+        response = requests.post(
+        url="https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        },
+        data=json.dumps({
+            "model": model,
+            "messages": [
+                {
+                "role": "user",
+                "content": prompt
+                }
+            ],
+            "modalities": ["image"]
+        })
+        )
+
+        result = response.json()
+
+        # The generated image will be in the assistant message
+        if result.get("choices"):
+            message = result["choices"][0]["message"]
+            if message.get("images"):
+                for image in message["images"]:
+                    image_url = image["image_url"]["url"]  # Base64 data URL
+                    print(f"Generated image: {image_url[:50]}...")
+                    return image_url
+        print("No image generated.")
+        return None
+
+    
+    def generateAIImage(self, prompt, model):
+        start_time = time.perf_counter()
+        try:
+            client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=self.api_key,
+            )
+
+            response = client.chat.completions.create(
+                model= "sourceful/riverflow-v2-fast",
+                messages=[
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                        ],
+                extra_body= {
+                    "modalities": ["image"]
+                }
+            )
+            end_time = time.perf_counter()
+            self.duration_ns = (end_time - start_time) * 1e9  # Convert seconds to nanoseconds
+            self.prompt_tokens = response.usage.prompt_tokens
+            self.eval_tokens = response.usage.completion_tokens
+            image_url = response.choices[0].message.images[0]['image_url']['url']
+            if image_url.startswith("data:"):
+                image_base64 = image_url.split(",", 1)[1]
+            else:
+                image_base64 = image_url
+            return image_base64
+        except Exception as e:
+            print(f"Error calling OpenRouter API for image generation: {e}")
+            return None

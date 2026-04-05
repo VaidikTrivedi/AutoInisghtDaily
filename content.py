@@ -1,9 +1,10 @@
 import json
-import os, ollama, requests, feedparser, textwrap
-from PIL import Image, ImageDraw, ImageFont
+import os, requests, feedparser
 from pathlib import Path
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from agent import AIAgent
+from image_generator import create_image_ollama
 import re
 
 # --- CONFIGURATION ---
@@ -19,33 +20,33 @@ HINDI_FONT_BOLD_PATH = Path(os.getenv("HINDI_FONT_BOLD_PATH") or "resources/Hind
 # Token tracking
 stats = {
     "total_prompt_tokens": 0,
-    "total_eval_tokens": 0,
+    "total_completion_tokens": 0,
     "total_duration_ns": 0
 }
 
 def log_ollama_usage(response):
     prompt_tokens = getattr(response, 'prompt_eval_count', 0)
-    eval_tokens = getattr(response, 'eval_count', 0)
+    completion_tokens = getattr(response, 'eval_count', 0)
     duration = getattr(response, 'total_duration', 0)
     
     stats["total_prompt_tokens"] += prompt_tokens
-    stats["total_eval_tokens"] += eval_tokens
+    stats["total_completion_tokens"] += completion_tokens
     stats["total_duration_ns"] += duration
     
-    print(f"📊 [Ollama Stats] Prompt: {prompt_tokens}, Eval: {eval_tokens}, Total: {prompt_tokens + eval_tokens} tokens")
+    print(f"📊 [Ollama Stats] Prompt: {prompt_tokens}, Eval: {completion_tokens}, Total: {prompt_tokens + completion_tokens} tokens")
 
 HEADER = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 }
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
-# Using soft, muted tones and deep grays for high engagement/readability
-THEMES = {
-    "finance": {"bg": "#F4F7F6", "text": "#1A2E35", "accent": "#4A7C7A"},  # Clean Slate
-    "tech":    {"bg": "#E8EAF6", "text": "#1A237E", "accent": "#3949AB"},  # Soft Cyber
-    "politics":{"bg": "#FCF3F2", "text": "#4A1A1A", "accent": "#A52A2A"},  # Muted Rose
-    "general": {"bg": "#F9F9F9", "text": "#2D2D2D", "accent": "#888888"}   # Minimalist
-}
+def log_token_usage(model:AIAgent):
+    prompt_tokens, completion_tokens, total_tokens, duration = model.getAIUsageStats()
+    print(f"Model: {model.ai_provider}, Prompt Tokens: {prompt_tokens}, Completion Tokens: {completion_tokens}, Total Tokens: {total_tokens}, Duration: {duration} ns")
+    stats["total_prompt_tokens"] += prompt_tokens
+    stats["total_completion_tokens"] += completion_tokens
+    stats["total_duration_ns"] += duration
+
 
 def get_headlines(limit=10):
     """Collects headlines using a browser-like User-Agent to avoid blocks."""
@@ -140,7 +141,7 @@ def get_description(url, headline):
 
     return headline
 
-def summarize_news_for_image(headline, news_description):
+def summarize_news_for_image(agent:AIAgent, headline, news_description):
     """Summarizes headline using local Ollama."""
     prompt = f"""
     Summarize the news headline and description into a one-line, punchy Instagram caption (max 25 words) ending with a single hashtag. 
@@ -150,9 +151,9 @@ def summarize_news_for_image(headline, news_description):
     Format: <description>your summary with hashtag here</description>
     """
     
-    response = ollama.generate(model=OLLAMA_SUMMARY_MODEL, prompt=prompt)
-    log_ollama_usage(response)
-    summary = response['response'].split('<description>')[1].split('</description>')[0].strip()
+    response = agent.getAIResponse(prompt=prompt, model=OLLAMA_SUMMARY_MODEL)
+    log_token_usage(agent)
+    summary = response.split('<description>')[1].split('</description>')[0].strip()
     if "one-line punchy" in summary:
         print("Found one-line punchy...")
         summary = summary.replace("Here is one-line punchy sentence for Instagram with one suitable hashtag: ", "").strip()
@@ -168,95 +169,7 @@ def summarize_news_for_image(headline, news_description):
     print(f"News summary for image: {summary}")
     return summary, hashtag.strip()
 
-def get_hashtags(headline, news_description):
-    """Summarizes headline using local Ollama."""
-    prompt = f"Provide a most suitable and catchy hashtag accoding to the news (Just provide hashtags, no text at all). News Headline: {headline}; News Description: {news_description}"
-    response = ollama.generate(model=OLLAMA_SUMMARY_MODEL, prompt=prompt)
-    log_ollama_usage(response)
-    summary = response['response'].strip().replace('"', '')
-    if "I need the actual headline" in summary:
-        summary = ""
-    print(f"News summary for description: {summary}")
-    return summary
-
-def get_safe_style(headline):
-    """Asks Ollama to pick a theme name, not a hex code."""
-    prompt = f"Categorize this news: '{headline}'. Pick exactly one: finance, tech, politics, or general. Return ONLY the word."
-    try:
-        response = ollama.generate(model='llama3', prompt=prompt)
-        log_ollama_usage(response)
-        category = response['response'].strip().lower()
-        # Fallback if category is weird
-        return THEMES.get(category, THEMES["general"])
-    except:
-        return THEMES["general"]
-
-def fit_text_to_box(draw, text, font_path, start_size, max_w, max_h):
-    """Shrinks font size until the entire block fits the max width/height."""
-    current_size = start_size
-    while current_size > 20:
-        font = ImageFont.truetype(font_path, current_size)
-        # Wrap text based on character width approx for the font size
-        lines = textwrap.wrap(text, width=int(max_w / (current_size * 0.5))) 
-        
-        # Calculate total height of the wrapped block
-        total_h = 0
-        for line in lines:
-            bbox = draw.textbbox((0, 0), line, font=font)
-            total_h += (bbox[3] - bbox[1]) + 15 # Line height + spacing
-        
-        if total_h <= max_h:
-            return font, lines, total_h
-        current_size -= 4
-    return ImageFont.load_default(), [text], 50
-
-def create_pro_image(index, headline, summary, source, language="en"):
-    W, H = 1080, 1080
-    theme = get_safe_style(headline)
-    img = Image.new('RGB', (W, H), color=theme["bg"])
-    draw = ImageDraw.Draw(img)
-
-    bold_font_language = HINDI_FONT_BOLD_PATH if language == "hi" else FONT_BOLD_PATH
-    regular_font_language = HINDI_FONT_REG_PATH if language == "hi" else FONT_REG_PATH
-
-    # 1. Fit Headline (Upper 50% of image)
-    head_font, head_lines, head_h = fit_text_to_box(
-        draw, headline.upper(), bold_font_language, 85, W*0.85, 450
-    )
-
-    # 2. Fit Summary (Below Headline)
-    # Give summary the remaining space minus some margins
-    sum_font, sum_lines, sum_h = fit_text_to_box(
-        draw, summary, regular_font_language, 45, W*0.8, 300
-    )
-
-    # 3. Drawing - Centered Vertical Layout
-    current_y = (H - (head_h + sum_h + 100)) / 2 # Total block centering
-
-    # Draw Headline
-    for line in head_lines:
-        bbox = draw.textbbox((0, 0), line, font=head_font)
-        draw.text(((W-(bbox[2]-bbox[0]))/2, current_y), line, font=head_font, fill=theme["text"])
-        current_y += (bbox[3]-bbox[1]) + 15
-
-    # Separator
-    current_y += 40
-    draw.line([(W*0.4, current_y), (W*0.6, current_y)], fill=theme["accent"], width=3)
-    current_y += 60
-
-    # Draw Summary
-    for line in sum_lines:
-        bbox = draw.textbbox((0, 0), line, font=sum_font)
-        draw.text(((W-(bbox[2]-bbox[0]))/2, current_y), line, font=sum_font, fill=theme["text"])
-        current_y += (bbox[3]-bbox[1]) + 10
-
-    # Footer
-    # footer_font = ImageFont.truetype(FONT_REG_PATH, 28)
-    # draw.text((W//2-80, H-80), f"SOURCE: {source.upper()}", font=footer_font, fill=theme["accent"])
-
-    img.save(f"{IMAGE_DIR}/post_{index}.png", quality=95)
-
-def write_description(news_summaries):
+def write_post_description(news_summaries):
     with open(f"{IMAGE_DIR}/description.txt", "w", encoding="utf-8") as f:
         for summary in news_summaries:
             # f.write(f"{summary['index']+1} - {summary['hashtags']} - source: ${summary['news_source']}\n")
@@ -267,21 +180,21 @@ def write_description(news_summaries):
     with open(f"{IMAGE_DIR}/news_summaries.json", "w", encoding="utf-8") as f:
         f.write(json.dumps(news_summaries, ensure_ascii=False, indent=2))
 
-def translate_to_hindi(text):
+def translate_to_hindi(agent:AIAgent, text):
     prompt = f"""
         You are a professional English (en) to Hindi (hi) translator. Your goal is to accurately convey the meaning and nuances of the original English text while adhering to Hindi grammar, vocabulary, and cultural sensitivities.
         Produce only the Hindi translation, without any additional explanations or commentary. Please translate the following English text into Hindi: {text}
         """
     try:
-        response = ollama.generate(model=OLLAMA_TRANSLATION_MODEL, prompt=prompt)
-        log_ollama_usage(response)
-        translation = response['response'].strip()
+        response = agent.getAIResponse(prompt=prompt, model=OLLAMA_TRANSLATION_MODEL)
+        log_token_usage(agent)
+        translation = response.strip()
         return translation
     except Exception as e:
         print(f"Error while translating text to Hindi: {e}")
         return None
 
-def generate_post():
+def generate_post(agent:AIAgent):
     print("🚀 Collecting news...")
     news_list = get_headlines(10)
     news_summaries = []
@@ -291,18 +204,19 @@ def generate_post():
         try:
             title = news["title"]
             news_description = get_description(news["link"], title)
-            news_summary_for_image, hashtag = summarize_news_for_image(title, news_description)
-            title_in_hindi = translate_to_hindi(title)
-            news_summaries_for_image_in_hindi = translate_to_hindi(news_summary_for_image)
-            language = "en"
-            if news_summaries_for_image_in_hindi and title_in_hindi:
-                language = "hi"
-                title = title_in_hindi
-                news_summary_for_image = news_summaries_for_image_in_hindi
-            print(f"🎨 Generating Image {i+1}...")
-            create_pro_image(i+1, title, news_summary_for_image, news["source"], language)
+            news_summary_for_image, hashtag = summarize_news_for_image(agent, title, news_description)
+            # title_in_hindi = translate_to_hindi(agent, title)
+            # news_summaries_for_image_in_hindi = translate_to_hindi(agent, news_summary_for_image)
+            # language = "en"
+            # if news_summaries_for_image_in_hindi and title_in_hindi:
+            #     language = "hi"
+            #     title = title_in_hindi
+            #     news_summary_for_image = news_summaries_for_image_in_hindi
+            # print(f"🎨 Generating Image {i+1}...")
+            # create_pro_image(agent, i+1, title, news_summary_for_image, news["source"], language)
             news_summaries.append({
                 "index": i,
+                "original_title": news["title"],
                 "headline": title,
                 "summary": news_summary_for_image,
                 "hashtag": hashtag,
@@ -311,17 +225,26 @@ def generate_post():
         except Exception as e:
             print(f"Error while summarizing story for headline: ${news} - {e}")
 
-    write_description(news_summaries)
+    write_post_description(news_summaries)
 
     print("\n" + "="*40)
-    print("📈 FINAL OLLAMA TOKEN USAGE SUMMARY")
+    print("📈 FINAL AI MODEL TOKEN USAGE SUMMARY")
     print(f"Total Prompt Tokens:   {stats['total_prompt_tokens']}")
-    print(f"Total Response Tokens: {stats['total_eval_tokens']}")
-    print(f"Total Tokens Used:     {stats['total_prompt_tokens'] + stats['total_eval_tokens']}")
+    print(f"Total Response Tokens: {stats['total_completion_tokens']}")
+    print(f"Total Tokens Used:     {stats['total_prompt_tokens'] + stats['total_completion_tokens']}")
     print(f"Total Duration:        {stats['total_duration_ns'] / 1e9:.2f}s")
     print("="*40)
 
-    print(f"✅ Success! images are ready in the '{IMAGE_DIR}' folder.")
+    return news_summaries
+
+    # print(f"✅ Success! images are ready in the '{IMAGE_DIR}' folder.")
 
 if __name__ == "__main__":
-    generate_post()
+    api_key = None
+    if os.getenv("RUN_LOCALLY", "False").lower() == "true":
+        ai_provider = AIAgent.OLLAMA
+    else:
+        ai_provider = AIAgent.OPENROUTER
+        api_key = os.getenv("OPENROUTER_API_KEY")
+    agent = AIAgent(ai_provider=ai_provider, api_key=api_key)
+    generate_post(agent)
