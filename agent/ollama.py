@@ -18,7 +18,7 @@ class OllamaClient:
             self.eval_count = getattr(response, 'eval_count', 0)
             self.duration_ns = getattr(response, 'total_duration', 0)
             return response['response']
-        except ollama.OllamaError as e:
+        except ollama.OllamaError as e: # type: ignore
             print(f"Error calling Ollama: {e.output}")
             return None
         

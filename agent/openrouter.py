@@ -42,8 +42,12 @@ class OpenRouterClient:
             # print(completion.choices[0].message.content)
             end_time = time.perf_counter()
             self.duration_ns = (end_time - start_time) * 1e9  # Convert seconds to nanoseconds
-            self.prompt_tokens = completion.usage.prompt_tokens
-            self.eval_tokens = completion.usage.completion_tokens
+            if completion.usage:
+                self.prompt_tokens = getattr(completion.usage, "prompt_tokens", 0)
+                self.eval_tokens = getattr(completion.usage, "completion_tokens", 0)
+            else:
+                self.prompt_tokens = 0
+                self.eval_tokens = 0
             return completion.choices[0].message.content
         except Exception as e:
             print(f"Error calling OpenRouter API: {e}")
@@ -83,7 +87,7 @@ class OpenRouterClient:
         return None
 
     
-    def generateAIImage(self, prompt, model):
+    def generateAIImage(self, prompt, model = "sourceful/riverflow-v2-fast"):
         start_time = time.perf_counter()
         try:
             client = OpenAI(
@@ -105,14 +109,19 @@ class OpenRouterClient:
             )
             end_time = time.perf_counter()
             self.duration_ns = (end_time - start_time) * 1e9  # Convert seconds to nanoseconds
-            self.prompt_tokens = response.usage.prompt_tokens
-            self.eval_tokens = response.usage.completion_tokens
-            image_url = response.choices[0].message.images[0]['image_url']['url']
-            if image_url.startswith("data:"):
-                image_base64 = image_url.split(",", 1)[1]
+            self.prompt_tokens = getattr(response.usage, "prompt_tokens", 0) if response.usage else 0
+            self.eval_tokens = getattr(response.usage, "completion_tokens", 0) if response.usage else 0
+            images = getattr(response.choices[0].message, "images", [])
+            if images and images[0] and images[0]['image_url'] and images[0]['image_url']['url']:
+                image_url = images[0]['image_url']['url']
+                if isinstance(image_url, str) and image_url.startswith("data:"):
+                    image_base64 = image_url.split(",", 1)[1]
+                else:
+                    image_base64 = image_url
+                return image_base64
             else:
-                image_base64 = image_url
-            return image_base64
+                print("No image generated in response.")
+                return None
         except Exception as e:
             print(f"Error calling OpenRouter API for image generation: {e}")
             return None
