@@ -45,7 +45,7 @@ def log_token_usage(model:AIAgent):
     print(f"Model: {model.ai_provider}, Prompt Tokens: {prompt_tokens}, Completion Tokens: {completion_tokens}, Total Tokens: {total_tokens}, Duration: {duration} ns")
     stats["total_prompt_tokens"] += prompt_tokens
     stats["total_completion_tokens"] += completion_tokens
-    stats["total_duration_ns"] += duration
+    stats["total_duration_ns"] += duration # type: ignore
 
 
 def get_headlines(limit=10):
@@ -144,7 +144,7 @@ def get_description(url, headline):
 def summarize_news_for_image(agent:AIAgent, headline, news_description):
     """Summarizes headline using local Ollama."""
     prompt = f"""
-    Summarize the news headline and description into a one-line, punchy Instagram caption (max 25 words) ending with a single hashtag. 
+    Summarize the news headline and description into a one-line, punchy Instagram caption (max 40 words) ending with a single hashtag. 
     Return your answer only inside <description> tags. 
     News Headline: {headline} 
     News Description: {news_description}
@@ -153,7 +153,7 @@ def summarize_news_for_image(agent:AIAgent, headline, news_description):
     
     response = agent.getAIResponse(prompt=prompt, model=OLLAMA_SUMMARY_MODEL)
     log_token_usage(agent)
-    summary = response.split('<description>')[1].split('</description>')[0].strip()
+    summary = response.split('<description>')[1].split('</description>')[0].strip() # type: ignore
     if "one-line punchy" in summary:
         print("Found one-line punchy...")
         summary = summary.replace("Here is one-line punchy sentence for Instagram with one suitable hashtag: ", "").strip()
@@ -188,7 +188,7 @@ def translate_to_hindi(agent:AIAgent, text):
     try:
         response = agent.getAIResponse(prompt=prompt, model=OLLAMA_TRANSLATION_MODEL)
         log_token_usage(agent)
-        translation = response.strip()
+        translation = response.strip() # type: ignore
         return translation
     except Exception as e:
         print(f"Error while translating text to Hindi: {e}")
