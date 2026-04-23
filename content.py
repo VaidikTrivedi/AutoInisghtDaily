@@ -63,7 +63,7 @@ def get_headlines(limit=10):
 
         'India': 'https://indianexpress.com/feed',
 
-        'AI': 'https://openai.com/blog/rss.xml',
+        # 'AI': 'https://openai.com/blog/rss.xml',
 
         'Innovation': 'https://newatlas.com/index.rss',
 
@@ -144,7 +144,7 @@ def get_description(url, headline):
 def summarize_news_for_image(agent:AIAgent, headline, news_description):
     """Summarizes headline using local Ollama."""
     prompt = f"""
-    Summarize the news headline and description into a one-line, punchy Instagram caption (max 40 words) ending with a single hashtag. 
+    Summarize the news headline and description into a one-line, punchy Instagram caption (between 25 - 50 words) ending with a single hashtag. 
     Return your answer only inside <description> tags. 
     News Headline: {headline} 
     News Description: {news_description}

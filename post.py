@@ -96,9 +96,10 @@ def post_to_instagram():
         print(f"Carousel ID created - ${carousel_id}")
         publish(carousel_id)
         print("Post is Live!")
+        return True
     except Exception as e:
         print(f"Error while uploading - {e}")
-    
+        return False
 
 
 if __name__ == "__main__":

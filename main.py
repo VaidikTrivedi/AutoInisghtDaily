@@ -16,5 +16,8 @@ if __name__ == "__main__":
     news_summaries = generate_post(agent)
     generate_images(agent, news_summaries, run_locally=run_locally)
     upload_to_stage()
-    post_to_instagram()
-    cleanup_server()
+    success = post_to_instagram()
+    if success:
+        cleanup_server()
+    else: 
+        print("Post failed, please mannually check the staging URL and post to Instagram.")
