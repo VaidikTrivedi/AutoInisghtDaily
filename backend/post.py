@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 import requests
 import time
 import os
-from upload import get_images
+from .upload import get_images
 
 load_dotenv()
 

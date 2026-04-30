@@ -1,10 +1,15 @@
 import os
+import sys
+
+# Add backend to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
+
 from dotenv import load_dotenv
-from agent import AIAgent
-from content import generate_post
-from image_generator import generate_images
-from post import post_to_instagram
-from upload import cleanup_server, upload_to_stage
+from backend.agent import AIAgent
+from backend.content import generate_post
+from backend.image_generator import generate_images
+from backend.post import post_to_instagram
+from backend.upload import cleanup_server, upload_to_stage
 
 load_dotenv()
 

@@ -3,8 +3,8 @@ import os, requests, feedparser
 from pathlib import Path
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from agent import AIAgent
-from image_generator import create_image_ollama
+from .agent import AIAgent
+from .image_generator import create_image_ollama
 import re
 
 # --- CONFIGURATION ---
@@ -12,10 +12,10 @@ load_dotenv()
 IMAGE_DIR = os.getenv("IMAGE_DIR") or "insta_news_cards"
 OLLAMA_SUMMARY_MODEL = os.getenv("OLLAMA_SUMMARY_MODEL") or "llama3"
 OLLAMA_TRANSLATION_MODEL = os.getenv("OLLAMA_TRANSLATION_MODEL") or "translategemma"
-FONT_REG_PATH = Path(os.getenv("FONT_REG_PATH") or "resources/Montserrat-Regular.ttf")
-FONT_BOLD_PATH = Path(os.getenv("FONT_BOLD_PATH") or "resources/Montserrat-Bold.ttf")
-HINDI_FONT_REG_PATH = Path(os.getenv("HINDI_FONT_REG_PATH") or "resources/Hindi-Regular.ttf")
-HINDI_FONT_BOLD_PATH = Path(os.getenv("HINDI_FONT_BOLD_PATH") or "resources/Hindi-Bold.ttf")
+FONT_REG_PATH = Path(os.getenv("FONT_REG_PATH") or "backend/resources/Montserrat-Regular.ttf")
+FONT_BOLD_PATH = Path(os.getenv("FONT_BOLD_PATH") or "backend/resources/Montserrat-Bold.ttf")
+HINDI_FONT_REG_PATH = Path(os.getenv("HINDI_FONT_REG_PATH") or "backend/resources/Hindi-Regular.ttf")
+HINDI_FONT_BOLD_PATH = Path(os.getenv("HINDI_FONT_BOLD_PATH") or "backend/resources/Hindi-Bold.ttf")
 
 # Token tracking
 stats = {

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoInsightDaily - Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <i class="fas fa-newspaper"></i>
+                <span>AutoInsight<span class="highlight">Daily</span></span>
+            </div>
+            <button class="sidebar-toggle" onclick="toggleSidebar()">
+                <i class="fas fa-bars"></i>
+            </button>
+        </div>
+        
+        <nav class="sidebar-nav">
+            <a href="#" class="nav-item active" data-section="dashboard">
+                <i class="fas fa-chart-pie"></i>
+                <span>Dashboard</span>
+            </a>
+            <a href="#" class="nav-item" data-section="news">
+                <i class="fas fa-rss"></i>
+                <span>News</span>
+            </a>
+            <a href="#" class="nav-item" data-section="ai">
+                <i class="fas fa-robot"></i>
+                <span>AI Processing</span>
+            </a>
+            <a href="#" class="nav-item" data-section="images">
+                <i class="fas fa-images"></i>
+                <span>Images</span>
+            </a>
+            <a href="#" class="nav-item" data-section="post">
+                <i class="fas fa-paper-plane"></i>
+                <span>Post</span>
+            </a>
+            <a href="#" class="nav-item" data-section="settings">
+                <i class="fas fa-cog"></i>
+                <span>Settings</span>
+            </a>
+        </nav>
+        
+        <div class="sidebar-footer">
+            <div class="status-indicator">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Idle</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <button class="mobile-menu" onclick="toggleSidebar()">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <h1 id="pageTitle">Dashboard</h1>
+            </div>
+            <div class="header-right">
+                <div class="ai-status" id="aiStatus">
+                    <i class="fas fa-circle"></i>
+                    <span>AI: Checking...</span>
+                </div>
+                <button class="btn btn-icon" onclick="toggleTheme()">
+                    <i class="fas fa-moon" id="themeIcon"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Dashboard Section -->
+        <section class="section active" id="dashboardSection">
+            <!-- Pipeline Status Card -->
+            <div class="card pipeline-card">
+                <div class="card-header">
+                    <h2><i class="fas fa-stream"></i> Pipeline Status</h2>
+                    <span class="badge" id="pipelineBadge">Idle</span>
+                </div>
+                <div class="pipeline-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p class="progress-text" id="progressText">Ready to start</p>
+                </div>
+                <div class="quick-actions">
+                    <button class="btn btn-primary btn-lg" onclick="runFullPipeline()">
+                        <i class="fas fa-play"></i> Quick Post
+                    </button>
+                    <button class="btn btn-secondary" onclick="fetchHeadlines()">
+                        <i class="fas fa-download"></i> Fetch News
+                    </button>
+                    <button class="btn btn-secondary" onclick="showSection('images')">
+                        <i class="fas fa-images"></i> View Images
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stats Row -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon blue">
+                        <i class="fas fa-coins"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="totalTokens">0</h3>
+                        <p>Total Tokens</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon green">
+                        <i class="fas fa-newspaper"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="headlineCount">0</h3>
+                        <p>Headlines</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon purple">
+                        <i class="fas fa-image"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="imageCount">0</h3>
+                        <p>Images</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon orange">
+                        <i class="fas fa-clock"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="processingTime">0s</h3>
+                        <p>Last Duration</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div class="card">
+                <div class="card-header">
+                    <h2><i class="fas fa-history"></i> Recent Activity</h2>
+                    <button class="btn btn-sm" onclick="refreshActivity()">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+                <div class="activity-list" id="activityList">
+                    <div class="activity-empty">
+                        <i class="fas fa-inbox"></i>
+                        <p>No recent activity</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- News Section -->
+        <section class="section" id="newsSection">
+            <div class="section-header">
+                <h2><i class="fas fa-rss"></i> News Headlines</h2>
+                <div class="section-actions">
+                    <div class="input-group">
+                        <label>Limit:</label>
+                        <input type="number" id="headlineLimit" value="8" min="1" max="15">
+                    </div>
+                    <button class="btn btn-primary" onclick="fetchHeadlines()">
+                        <i class="fas fa-download"></i> Fetch Headlines
+                    </button>
+                </div>
+            </div>
+
+            <div class="headlines-container" id="headlinesContainer">
+                <div class="empty-state">
+                    <i class="fas fa-newspaper"></i>
+                    <h3>No headlines fetched</h3>
+                    <p>Click "Fetch Headlines" to get started</p>
+                </div>
+            </div>
+
+            <div class="section-footer" id="newsFooter" style="display: none;">
+                <button class="btn btn-secondary" onclick="selectAllHeadlines(true)">
+                    <i class="fas fa-check-double"></i> Select All
+                </button>
+                <button class="btn btn-secondary" onclick="selectAllHeadlines(false)">
+                    <i class="fas fa-times"></i> Deselect All
+                </button>
+                <button class="btn btn-primary" onclick="summarizeAll()">
+                    <i class="fas fa-magic"></i> Summarize Selected
+                </button>
+            </div>
+        </section>
+
+        <!-- AI Processing Section -->
+        <section class="section" id="aiSection">
+            <div class="section-header">
+                <h2><i class="fas fa-robot"></i> AI Processing</h2>
+            </div>
+
+            <div class="ai-config card">
+                <h3>AI Provider</h3>
+                <div class="provider-toggle">
+                    <button class="provider-btn active" id="ollamaBtn" onclick="setProvider('ollama')">
+                        <i class="fas fa-server"></i> Ollama (Local)
+                    </button>
+                    <button class="provider-btn" id="openrouterBtn" onclick="setProvider('openrouter')">
+                        <i class="fas fa-cloud"></i> OpenRouter
+                    </button>
+                </div>
+                <div class="ai-status-detail" id="aiStatusDetail">
+                    <p>Checking connection...</p>
+                </div>
+            </div>
+
+            <div class="summaries-container" id="summariesContainer">
+                <div class="empty-state">
+                    <i class="fas fa-align-left"></i>
+                    <h3>No summaries yet</h3>
+                    <p>Fetch and summarize headlines first</p>
+                </div>
+            </div>
+
+            <div class="section-footer" id="aiFooter" style="display: none;">
+                <button class="btn btn-primary" onclick="generateImages()">
+                    <i class="fas fa-wand-magic-sparkles"></i> Generate Images
+                </button>
+            </div>
+        </section>
+
+        <!-- Images Section -->
+        <section class="section" id="imagesSection">
+            <div class="section-header">
+                <h2><i class="fas fa-images"></i> Generated Images</h2>
+                <div class="section-actions">
+                    <button class="btn btn-secondary" onclick="refreshImages()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                    <button class="btn btn-primary" onclick="generateImages()">
+                        <i class="fas fa-wand-magic-sparkles"></i> Generate
+                    </button>
+                </div>
+            </div>
+
+            <div class="images-grid" id="imagesGrid">
+                <div class="empty-state">
+                    <i class="fas fa-image"></i>
+                    <h3>No images generated</h3>
+                    <p>Complete the summarization step first</p>
+                </div>
+            </div>
+
+            <div class="section-footer" id="imagesFooter" style="display: none;">
+                <button class="btn btn-primary" onclick="uploadToStaging()">
+                    <i class="fas fa-cloud-upload-alt"></i> Upload to Staging
+                </button>
+            </div>
+        </section>
+
+        <!-- Post Section -->
+        <section class="section" id="postSection">
+            <div class="section-header">
+                <h2><i class="fas fa-paper-plane"></i> Post to Instagram</h2>
+            </div>
+
+            <div class="post-preview card">
+                <h3><i class="fas fa-eye"></i> Carousel Preview</h3>
+                <div class="carousel-preview" id="carouselPreview">
+                    <div class="empty-state">
+                        <i class="fas fa-images"></i>
+                        <p>Upload images to staging first</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="staging-status card">
+                <h3><i class="fas fa-server"></i> Staging Server</h3>
+                <div class="staging-info" id="stagingInfo">
+                    <p>Loading staging info...</p>
+                </div>
+                <div class="staging-actions">
+                    <button class="btn btn-secondary" onclick="refreshStaging()">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                    <button class="btn btn-danger" onclick="cleanupStaging()">
+                        <i class="fas fa-trash"></i> Cleanup
+                    </button>
+                </div>
+            </div>
+
+            <div class="instagram-post card">
+                <h3><i class="fab fa-instagram"></i> Instagram Connection</h3>
+                <div class="instagram-status" id="instagramStatus">
+                    <p>Checking connection...</p>
+                </div>
+                <button class="btn btn-primary btn-lg" onclick="postToInstagram()" id="postBtn">
+                    <i class="fas fa-paper-plane"></i> Post to Instagram
+                </button>
+            </div>
+        </section>
+
+        <!-- Settings Section -->
+        <section class="section" id="settingsSection">
+            <div class="section-header">
+                <h2><i class="fas fa-cog"></i> Settings</h2>
+            </div>
+
+            <div class="settings-grid">
+                <div class="card settings-card">
+                    <h3><i class="fas fa-robot"></i> AI Settings</h3>
+                    <div class="setting-item">
+                        <label>Summary Model</label>
+                        <input type="text" id="summaryModel" value="llama3">
+                    </div>
+                    <div class="setting-item">
+                        <label>Translation Model</label>
+                        <input type="text" id="translationModel" value="translategemma">
+                    </div>
+                    <div class="setting-item">
+                        <label>Run Locally</label>
+                        <label class="switch">
+                            <input type="checkbox" id="runLocally">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="card settings-card">
+                    <h3><i class="fas fa-folder"></i> Paths</h3>
+                    <div class="setting-item">
+                        <label>Image Directory</label>
+                        <input type="text" id="imageDir" value="insta_news_cards" readonly>
+                    </div>
+                    <div class="setting-item">
+                        <label>Staging URL</label>
+                        <input type="text" id="stagingUrl" readonly>
+                    </div>
+                </div>
+
+                <div class="card settings-card">
+                    <h3><i class="fab fa-instagram"></i> Instagram API</h3>
+                    <div class="setting-item">
+                        <label>Connection Status</label>
+                        <span class="status-badge" id="igConnectionStatus">Checking...</span>
+                    </div>
+                    <button class="btn btn-secondary" onclick="testInstagramConnection()">
+                        <i class="fas fa-plug"></i> Test Connection
+                    </button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loader">
+            <div class="loader-spinner"></div>
+            <p id="loadingText">Processing...</p>
+        </div>
+    </div>
+
+    <!-- Image Preview Modal -->
+    <div class="modal" id="imageModal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <img id="modalImage" src="" alt="Preview">
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

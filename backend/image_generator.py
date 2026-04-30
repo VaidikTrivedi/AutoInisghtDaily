@@ -5,13 +5,13 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import textwrap
 from pathlib import Path
-from agent import AIAgent
+from .agent import AIAgent
 
 IMAGE_DIR = os.getenv("IMAGE_DIR") or "insta_news_cards"
-FONT_REG_PATH = Path(os.getenv("FONT_REG_PATH") or "resources/Montserrat-Regular.ttf")
-FONT_BOLD_PATH = Path(os.getenv("FONT_BOLD_PATH") or "resources/Montserrat-Bold.ttf")
-HINDI_FONT_REG_PATH = Path(os.getenv("HINDI_FONT_REG_PATH") or "resources/Hindi-Regular.ttf")
-HINDI_FONT_BOLD_PATH = Path(os.getenv("HINDI_FONT_BOLD_PATH") or "resources/Hindi-Bold.ttf")
+FONT_REG_PATH = Path(os.getenv("FONT_REG_PATH") or "backend/resources/Montserrat-Regular.ttf")
+FONT_BOLD_PATH = Path(os.getenv("FONT_BOLD_PATH") or "backend/resources/Montserrat-Bold.ttf")
+HINDI_FONT_REG_PATH = Path(os.getenv("HINDI_FONT_REG_PATH") or "backend/resources/Hindi-Regular.ttf")
+HINDI_FONT_BOLD_PATH = Path(os.getenv("HINDI_FONT_BOLD_PATH") or "backend/resources/Hindi-Bold.ttf")
 
 THEMES = {
     "finance": {"bg": "#F4F7F6", "text": "#1A2E35", "accent": "#4A7C7A"},  # Clean Slate
@@ -174,9 +174,14 @@ def print_news_on_image(image, headline, summary):
         bbox = draw.textbbox((0, 0), line, font=head_font)
         line_width = bbox[2] - bbox[0]
         x = (W - line_width) / 2
-        # Add text shadow for better readability on varied backgrounds
-        draw.text((x + 2, current_y + 2), line, font=head_font, fill="black")
-        draw.text((x, current_y), line, font=head_font, fill="white")
+        # Add stronger text outline/shadow for better readability on varied backgrounds
+        outline_color = (0, 0, 0)  # Black outline
+        text_color = (255, 255, 255)  # Bright white
+        # Draw outline (multiple offsets for thicker outline)
+        for ox, oy in [(-2, -2), (-2, 2), (2, -2), (2, 2), (-2, 0), (2, 0), (0, -2), (0, 2)]:
+            draw.text((x + ox, current_y + oy), line, font=head_font, fill=outline_color)
+        # Draw main text
+        draw.text((x, current_y), line, font=head_font, fill=text_color)
         current_y += (bbox[3] - bbox[1]) + 10
     
     # Gap between headline and summary
@@ -187,9 +192,14 @@ def print_news_on_image(image, headline, summary):
         bbox = draw.textbbox((0, 0), line, font=sum_font)
         line_width = bbox[2] - bbox[0]
         x = (W - line_width) / 2
-        # Add text shadow for better readability
-        draw.text((x + 1, current_y + 1), line, font=sum_font, fill="black")
-        draw.text((x, current_y), line, font=sum_font, fill="white")
+        # Add stronger text outline/shadow for better readability
+        outline_color = (0, 0, 0)  # Black outline
+        text_color = (255, 255, 255)  # Bright white
+        # Draw outline (multiple offsets for thicker outline)
+        for ox, oy in [(-1, -1), (-1, 1), (1, -1), (1, 1), (-1, 0), (1, 0), (0, -1), (0, 1)]:
+            draw.text((x + ox, current_y + oy), line, font=sum_font, fill=outline_color)
+        # Draw main text
+        draw.text((x, current_y), line, font=sum_font, fill=text_color)
         current_y += (bbox[3] - bbox[1]) + 8
     
     return image
