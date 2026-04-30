@@ -105,7 +105,8 @@ def create_image_openrouter(prompt):
 def generate_background_image_prompt(agent:AIAgent, headline):
     prompt = f"""
     I want to create a dark PNG image background in 1:1 aspect ratio for instagram post based on news headline.
-    So write a best prompt to generate background for images, Just background, I will write a news on the images by my self.
+    So write a best prompt to generate background for images, Just background, I will write a news on the images by my self. 
+    Explicitly mention to not include any text in the image, only background. The background should be relevant to the news headline.
     Provide just a one best prompt to generate background image, I will pass this prompt to next LLM without any modification.
     Here is a news headline: "{headline}"
     """

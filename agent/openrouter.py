@@ -96,7 +96,8 @@ class OpenRouterClient:
             )
 
             response = client.chat.completions.create(
-                model= "sourceful/riverflow-v2-fast",
+                # model= "sourceful/riverflow-v2-fast",
+                model = "black-forest-labs/flux.2-klein-4b",
                 messages=[
                         {
                             "role": "user",
