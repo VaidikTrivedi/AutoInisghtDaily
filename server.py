@@ -31,6 +31,50 @@ from backend.post import post_to_instagram
 
 load_dotenv()
 
+# --- State Persistence ---
+STATE_FILE = Path("pipeline_state.json")
+
+def save_state():
+    """Save current pipeline state to disk for persistence across restarts."""
+    state_data = {
+        "pipeline_state": pipeline_state,
+        "activity_log": activity_log[-50:],  # Keep last 50 activities
+        "news_cache": news_cache,
+        "summaries_cache": summaries_cache,
+        "saved_at": datetime.now().isoformat()
+    }
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state_data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Warning: Could not save state: {e}")
+
+def load_state():
+    """Load pipeline state from disk on startup."""
+    global pipeline_state, activity_log, news_cache, summaries_cache
+    if STATE_FILE.exists():
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                state_data = json.load(f)
+            
+            # Restore state (but reset status to idle on restart)
+            pipeline_state.update(state_data.get("pipeline_state", {}))
+            pipeline_state["status"] = "idle"  # Always start idle
+            pipeline_state["current_step"] = ""
+            pipeline_state["progress"] = 0
+            
+            activity_log.extend(state_data.get("activity_log", []))
+            news_cache.extend(state_data.get("news_cache", []))
+            summaries_cache.extend(state_data.get("summaries_cache", []))
+            
+            saved_at = state_data.get("saved_at", "unknown")
+            print(f"✅ Restored state from {saved_at}")
+            print(f"   - {len(news_cache)} headlines cached")
+            print(f"   - {len(summaries_cache)} summaries cached")
+            print(f"   - {len(activity_log)} activity entries")
+        except Exception as e:
+            print(f"Warning: Could not load state: {e}")
+
 # --- App Configuration ---
 app = FastAPI(
     title="AutoInsightDaily",
@@ -61,10 +105,13 @@ pipeline_state = {
     "error": None
 }
 
-activity_log = []
-news_cache = []
-summaries_cache = []
+activity_log: List[Dict] = []
+news_cache: List[Dict] = []
+summaries_cache: List[Dict] = []
 connected_websockets: List[WebSocket] = []
+
+# Load saved state on startup
+load_state()
 
 # --- Pydantic Models ---
 class NewsSource(BaseModel):
@@ -107,6 +154,10 @@ def log_activity(action: str, status: str = "success", details: Optional[Dict[st
     activity_log.insert(0, entry)
     if len(activity_log) > 100:
         activity_log.pop()
+    
+    # Auto-save state after each activity (for persistence)
+    if status in ["success", "error"]:
+        save_state()
 
 async def broadcast_state():
     """Broadcast pipeline state to all connected WebSocket clients."""
@@ -648,6 +699,55 @@ async def get_token_stats():
 async def get_activity_log():
     """Get recent activity log."""
     return {"activity": activity_log}
+
+# State Management
+@app.get("/api/state")
+async def get_cached_state():
+    """Get current cached state (headlines, summaries, etc.)."""
+    return {
+        "headlines_count": len(news_cache),
+        "summaries_count": len(summaries_cache),
+        "headlines": news_cache,
+        "summaries": summaries_cache,
+        "pipeline_state": pipeline_state,
+        "can_resume_from": {
+            "fetch": True,
+            "summarize": len(news_cache) > 0,
+            "generate": len(summaries_cache) > 0,
+            "upload": len(summaries_cache) > 0,
+            "post": len(summaries_cache) > 0
+        }
+    }
+
+@app.delete("/api/state/clear")
+async def clear_state():
+    """Clear all cached state and start fresh."""
+    global news_cache, summaries_cache, activity_log, pipeline_state
+    
+    news_cache = []
+    summaries_cache = []
+    activity_log = []
+    pipeline_state = {
+        "status": "idle",
+        "current_step": "",
+        "progress": 0,
+        "message": "",
+        "last_run": None,
+        "error": None
+    }
+    
+    # Delete state file
+    if STATE_FILE.exists():
+        STATE_FILE.unlink()
+    
+    log_activity("🗑️ Cleared all cached state", "success", step="cleanup")
+    return {"success": True, "message": "State cleared"}
+
+@app.post("/api/state/save")
+async def manual_save_state():
+    """Manually save current state to disk."""
+    save_state()
+    return {"success": True, "message": "State saved"}
 
 
 if __name__ == "__main__":

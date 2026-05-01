@@ -7,11 +7,40 @@ import textwrap
 from pathlib import Path
 from .agent import AIAgent
 
+# Get absolute path to the backend/resources directory
+# Use the actual file path and resolve it immediately at module load time
+_THIS_FILE = Path(__file__).resolve()
+_RESOURCES_DIR = _THIS_FILE.parent / "resources"
+_ABSOLUTE_PATH = os.getenv("ABSOLUTE_PATH") or str(_RESOURCES_DIR)
+
+# Verify fonts exist at startup
+def _get_font_path(env_var, default_filename):
+    """Get font path from env or default, always returns absolute string path."""
+    env_path = os.getenv(env_var)
+    if env_path:
+        p = Path(env_path).resolve()
+        if p.exists():
+            return str(p)
+    
+    # Use the resources directory relative to this file
+    font_path = _RESOURCES_DIR / default_filename
+    if not font_path.exists():
+        # Fallback: try from current working directory
+        alt_path = Path.cwd() / "backend" / "resources" / default_filename
+        if alt_path.exists():
+            return str(alt_path)
+        # Another fallback: absolute hardcoded path
+        hardcoded = Path(_ABSOLUTE_PATH) / default_filename
+        if hardcoded.exists():
+            return str(hardcoded)
+    return str(font_path)
+
 IMAGE_DIR = os.getenv("IMAGE_DIR") or "insta_news_cards"
-FONT_REG_PATH = Path(os.getenv("FONT_REG_PATH") or "backend/resources/Montserrat-Regular.ttf")
-FONT_BOLD_PATH = Path(os.getenv("FONT_BOLD_PATH") or "backend/resources/Montserrat-Bold.ttf")
-HINDI_FONT_REG_PATH = Path(os.getenv("HINDI_FONT_REG_PATH") or "backend/resources/Hindi-Regular.ttf")
-HINDI_FONT_BOLD_PATH = Path(os.getenv("HINDI_FONT_BOLD_PATH") or "backend/resources/Hindi-Bold.ttf")
+FONT_REG_PATH = _get_font_path("FONT_REG_PATH", "Montserrat-Regular.ttf")
+FONT_BOLD_PATH = _get_font_path("FONT_BOLD_PATH", "Montserrat-Bold.ttf")
+FONT_ITALIC_PATH = _get_font_path("FONT_ITALIC_PATH", "Roboto-Italic.ttf")
+HINDI_FONT_REG_PATH = _get_font_path("HINDI_FONT_REG_PATH", "Hindi-Regular.ttf")
+HINDI_FONT_BOLD_PATH = _get_font_path("HINDI_FONT_BOLD_PATH", "Hindi-Bold.ttf")
 
 THEMES = {
     "finance": {"bg": "#F4F7F6", "text": "#1A2E35", "accent": "#4A7C7A"},  # Clean Slate
@@ -35,8 +64,9 @@ def get_safe_style(agent:AIAgent, headline):
 def fit_text_to_box(draw, text, font_path, start_size, max_w, max_h):
     """Shrinks font size until the entire block fits the max width/height."""
     current_size = start_size
+    font_path_str = str(font_path)
     while current_size > 20:
-        font = ImageFont.truetype(font_path, current_size)
+        font = ImageFont.truetype(font_path_str, current_size)
         # Wrap text based on character width approx for the font size
         lines = textwrap.wrap(text, width=int(max_w / (current_size * 0.5))) 
         
@@ -161,7 +191,7 @@ def print_news_on_image(image, headline, summary):
     
     # Fit summary below headline (max 35% of image height)
     sum_font, sum_lines, sum_h = fit_text_to_box(
-        draw, summary, FONT_REG_PATH, 40, max_width, H * 0.35
+        draw, summary, FONT_ITALIC_PATH, 40, max_width, H * 0.35
     )
     
     # Calculate starting Y position to center the text block vertically
@@ -169,37 +199,35 @@ def print_news_on_image(image, headline, summary):
     start_y = (H - total_text_height) / 2
     current_y = max(margin_top, start_y)
     
-    # Draw headline (centered horizontally)
+    # Draw headline with strong outline for visibility on any background
     for line in head_lines:
         bbox = draw.textbbox((0, 0), line, font=head_font)
         line_width = bbox[2] - bbox[0]
         x = (W - line_width) / 2
-        # Add stronger text outline/shadow for better readability on varied backgrounds
-        outline_color = (0, 0, 0)  # Black outline
-        text_color = (255, 255, 255)  # Bright white
-        # Draw outline (multiple offsets for thicker outline)
-        for ox, oy in [(-2, -2), (-2, 2), (2, -2), (2, 2), (-2, 0), (2, 0), (0, -2), (0, 2)]:
-            draw.text((x + ox, current_y + oy), line, font=head_font, fill=outline_color)
-        # Draw main text
-        draw.text((x, current_y), line, font=head_font, fill=text_color)
+        # Draw black outline (stroke effect) for maximum contrast
+        for dx in [-3, -2, -1, 0, 1, 2, 3]:
+            for dy in [-3, -2, -1, 0, 1, 2, 3]:
+                if dx != 0 or dy != 0:
+                    draw.text((x + dx, current_y + dy), line, font=head_font, fill="black")
+        # Draw bright white text on top
+        draw.text((x, current_y), line, font=head_font, fill="#FFFFFF")
         current_y += (bbox[3] - bbox[1]) + 10
     
     # Gap between headline and summary
     current_y += 30
     
-    # Draw summary (centered horizontally)
+    # Draw summary with strong outline for visibility
     for line in sum_lines:
         bbox = draw.textbbox((0, 0), line, font=sum_font)
         line_width = bbox[2] - bbox[0]
         x = (W - line_width) / 2
-        # Add stronger text outline/shadow for better readability
-        outline_color = (0, 0, 0)  # Black outline
-        text_color = (255, 255, 255)  # Bright white
-        # Draw outline (multiple offsets for thicker outline)
-        for ox, oy in [(-1, -1), (-1, 1), (1, -1), (1, 1), (-1, 0), (1, 0), (0, -1), (0, 1)]:
-            draw.text((x + ox, current_y + oy), line, font=sum_font, fill=outline_color)
-        # Draw main text
-        draw.text((x, current_y), line, font=sum_font, fill=text_color)
+        # Draw black outline (stroke effect) for maximum contrast
+        for dx in [-2, -1, 0, 1, 2]:
+            for dy in [-2, -1, 0, 1, 2]:
+                if dx != 0 or dy != 0:
+                    draw.text((x + dx, current_y + dy), line, font=sum_font, fill="black")
+        # Draw bright white text on top
+        draw.text((x, current_y), line, font=sum_font, fill="#FFFFFF")
         current_y += (bbox[3] - bbox[1]) + 8
     
     return image

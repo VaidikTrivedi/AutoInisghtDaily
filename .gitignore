@@ -6,3 +6,5 @@ __pycache__
 config
 insta_news_cards
 temp.py
+pipeline_state.json
+server.log
