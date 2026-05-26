@@ -4,6 +4,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from .agent import AIAgent
+# from agent import AIAgent
 from .image_generator import create_image_ollama
 import re
 
@@ -63,7 +64,7 @@ def get_headlines(limit=10):
 
         'India': 'https://indianexpress.com/feed',
 
-        # 'AI': 'https://openai.com/blog/rss.xml',
+        'AI': 'https://openai.com/blog/rss.xml',
 
         'Innovation': 'https://newatlas.com/index.rss',
 
@@ -112,7 +113,7 @@ def get_description(url, headline):
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.content, "html.parser")
-            group_elem = soup.find(class_="group")
+            group_elem = soup.find('p') or soup.find(class_="group")
             if group_elem:
                 text = group_elem.get_text(separator='', strip=True)
                 return text
