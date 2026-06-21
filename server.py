@@ -105,6 +105,17 @@ pipeline_state = {
     "error": None
 }
 
+# AI Provider Configuration State
+# Default to OpenRouter with free models
+ai_config = {
+    "provider": AIAgent.OPENROUTER,  # Default to OpenRouter
+    "models": {
+        "summary": "openrouter/free:free",  # OpenRouter free model
+        "translation": os.getenv("OLLAMA_TRANSLATION_MODEL", "translategemma"),
+        "image": "sourceful/riverflow-v2-fast"  # OpenRouter image model
+    }
+}
+
 activity_log: List[Dict] = []
 news_cache: List[Dict] = []
 summaries_cache: List[Dict] = []
@@ -141,6 +152,10 @@ class SettingsUpdate(BaseModel):
     headline_limit: Optional[int] = None
     auto_cleanup: Optional[bool] = None
 
+class AIProviderUpdate(BaseModel):
+    provider: str  # "ollama" or "openrouter"
+    models: Optional[Dict[str, str]] = None  # {"summary": "model_name", "image": "model_name"}
+
 # --- Helper Functions ---
 def log_activity(action: str, status: str = "success", details: Optional[Dict[str, Any]] = None, step: Optional[str] = None):
     """Add entry to activity log with rich details."""
@@ -168,10 +183,21 @@ async def broadcast_state():
             pass
 
 def get_agent():
-    """Initialize AI agent based on settings."""
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    """Initialize AI agent based on current configuration."""
+    global ai_config
+    
+    # Provider is already set to OPENROUTER by default
+    # Can be overridden by environment variable if needed
     run_locally = os.getenv("RUN_LOCALLY", "False").lower() == "true"
-    ai_provider = AIAgent.OLLAMA if run_locally else AIAgent.OPENROUTER
+    if run_locally and ai_config["provider"] == AIAgent.OPENROUTER:
+        # Switch to Ollama if RUN_LOCALLY is set and we haven't explicitly chosen OpenRouter
+        ai_config["provider"] = AIAgent.OLLAMA
+        # Update models to Ollama-compatible ones
+        if ai_config["models"]["summary"].startswith("meta-llama") or "/" in ai_config["models"]["summary"]:
+            ai_config["models"]["summary"] = os.getenv("OLLAMA_SUMMARY_MODEL", "llama3")
+    
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    ai_provider = ai_config["provider"]
     return AIAgent(ai_provider=ai_provider, api_key=api_key)
 
 # --- Page Routes ---
@@ -286,7 +312,8 @@ async def summarize_single(request: SummarizeRequest):
     try:
         agent = get_agent()
         description = request.description or request.headline
-        summary, hashtag = summarize_news_for_image(agent, request.headline, description)
+        # Use the configured model from ai_config
+        summary, hashtag = summarize_news_for_image(agent, request.headline, description, model=ai_config["models"]["summary"])
         return {"summary": summary, "hashtag": hashtag}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -317,7 +344,8 @@ async def summarize_batch(background_tasks: BackgroundTasks):
             await broadcast_state()
             
             description = get_description(news["link"], news["title"])
-            summary, hashtag = summarize_news_for_image(agent, news["title"], description)
+            # Use the configured model from ai_config
+            summary, hashtag = summarize_news_for_image(agent, news["title"], description, model=ai_config["models"]["summary"])
             
             summaries_cache.append({
                 "index": i,
@@ -404,7 +432,7 @@ async def generate_all_images():
             
             # Generate background prompt and image
             image_bg_prompt = generate_background_image_prompt(agent, news["headline"])
-            background_image = generate_background_image(agent, image_bg_prompt)
+            background_image = generate_background_image(agent, image_bg_prompt, model=ai_config["models"]["image"])
             
             if background_image:
                 news_post = print_news_on_image(background_image, news["headline"], news["summary"])
@@ -585,22 +613,75 @@ async def get_instagram_status():
 @app.get("/api/settings")
 async def get_settings():
     """Get current settings."""
+    global ai_config
+    
+    # Initialize provider if not set
+    if ai_config["provider"] is None:
+        run_locally = os.getenv("RUN_LOCALLY", "False").lower() == "true"
+        ai_config["provider"] = AIAgent.OLLAMA if run_locally else AIAgent.OPENROUTER
+    
     return {
         "run_locally": os.getenv("RUN_LOCALLY", "False").lower() == "true",
+        "ai_provider": ai_config["provider"],
+        "models": ai_config["models"],
         "has_openrouter_key": bool(os.getenv("OPENROUTER_API_KEY")),
         "image_dir": os.getenv("IMAGE_DIR") or "insta_news_cards",
         "staging_url": os.getenv("STAGING_URL") or "",
         "has_instagram": bool(os.getenv("ACCESS_TOKEN") and os.getenv("IG_USER_ID")),
-        "summary_model": os.getenv("OLLAMA_SUMMARY_MODEL") or "llama3",
-        "translation_model": os.getenv("OLLAMA_TRANSLATION_MODEL") or "translategemma"
+        "summary_model": ai_config["models"]["summary"],
+        "translation_model": ai_config["models"]["translation"]
+    }
+
+@app.post("/api/ai/provider")
+async def set_ai_provider(config: AIProviderUpdate):
+    """Update AI provider and models."""
+    global ai_config
+    
+    # Validate provider
+    if config.provider not in [AIAgent.OLLAMA, AIAgent.OPENROUTER]:
+        raise HTTPException(status_code=400, detail=f"Invalid provider: {config.provider}")
+    
+    # Check if OpenRouter key exists when selecting openrouter
+    if config.provider == AIAgent.OPENROUTER and not os.getenv("OPENROUTER_API_KEY"):
+        raise HTTPException(status_code=400, detail="OpenRouter API key not configured")
+    
+    # Update provider
+    old_provider = ai_config["provider"]
+    ai_config["provider"] = config.provider
+    
+    # Update models if provided, otherwise set defaults based on provider
+    if config.models:
+        ai_config["models"].update(config.models)
+    elif old_provider != config.provider:
+        # Provider changed, set appropriate default models
+        if config.provider == AIAgent.OLLAMA:
+            ai_config["models"]["summary"] = os.getenv("OLLAMA_SUMMARY_MODEL", "llama3")
+        else:  # OpenRouter
+            ai_config["models"]["summary"] = "openrouter/free"
+    
+    log_activity(
+        f"AI provider changed to {config.provider}", 
+        "success", 
+        {"provider": config.provider, "models": ai_config["models"]}
+    )
+    
+    return {
+        "success": True,
+        "provider": ai_config["provider"],
+        "models": ai_config["models"]
     }
 
 @app.get("/api/ai/status")
 async def get_ai_status():
     """Check AI provider status."""
-    run_locally = os.getenv("RUN_LOCALLY", "False").lower() == "true"
+    global ai_config
     
-    if run_locally:
+    # Ensure provider is initialized
+    get_agent()
+    
+    current_provider = ai_config["provider"]
+    
+    if current_provider == AIAgent.OLLAMA:
         # Check Ollama
         try:
             import requests
@@ -609,17 +690,29 @@ async def get_ai_status():
             return {
                 "provider": "ollama",
                 "status": "connected",
-                "models": [m["name"] for m in models]
+                "models": [m["name"] for m in models],
+                "current_models": ai_config["models"]
             }
         except:
-            return {"provider": "ollama", "status": "disconnected", "models": []}
+            return {
+                "provider": "ollama", 
+                "status": "disconnected", 
+                "models": [],
+                "current_models": ai_config["models"]
+            }
     else:
         # Check OpenRouter
         has_key = bool(os.getenv("OPENROUTER_API_KEY"))
         return {
             "provider": "openrouter",
             "status": "connected" if has_key else "no_api_key",
-            "models": ["gemma4", "llama3", "qwen3.5"] if has_key else []
+            "models": [
+                "openrouter/free",
+                "google/gemma-2-9b-it:free",
+                "qwen/qwen-2-7b-instruct:free",
+                "mistralai/mistral-7b-instruct:free"
+            ] if has_key else [],
+            "current_models": ai_config["models"]
         }
 
 # Full Pipeline

@@ -142,8 +142,14 @@ def get_description(url, headline):
 
     return headline
 
-def summarize_news_for_image(agent:AIAgent, headline, news_description):
-    """Summarizes headline using local Ollama."""
+def summarize_news_for_image(agent:AIAgent, headline, news_description, model=None):
+    """Summarizes headline using the provided agent and model.
+    Model parameter is now required to ensure correct model is used.
+    """
+    if model is None:
+        # Fallback to environment variable for backward compatibility
+        model = OLLAMA_SUMMARY_MODEL
+
     prompt = f"""
     Summarize the news headline and description into a one-line, punchy Instagram caption (between 25 - 50 words) ending with a single hashtag. 
     Return your answer only inside <description> tags. 
@@ -152,22 +158,27 @@ def summarize_news_for_image(agent:AIAgent, headline, news_description):
     Format: <description>your summary with hashtag here</description>
     """
     
-    response = agent.getAIResponse(prompt=prompt, model=OLLAMA_SUMMARY_MODEL)
+    response = agent.getAIResponse(prompt=prompt, model=model)
     log_token_usage(agent)
-    summary = response.split('<description>')[1].split('</description>')[0].strip() # type: ignore
-    if "one-line punchy" in summary:
-        print("Found one-line punchy...")
-        summary = summary.replace("Here is one-line punchy sentence for Instagram with one suitable hashtag: ", "").strip()
-        summary = summary.replace("Here's a one-line punchy sentence for Instagram:", "").strip()
-    hashtag = ""
-    match = re.search(r'#[a-zA-Z0-9]+', summary)
-    if match:
-        hashtag = match.group(0)
-        summary = summary.replace(hashtag.strip(), "")
-        print(f"Hashtag: {hashtag}")
-    if "I need the actual headline" in summary:
-        summary = ""
-    print(f"News summary for image: {summary}")
+    summary = response
+    hashtag = "#news"
+    try:
+        summary = response.split('<description>')[1].split('</description>')[0].strip() # type: ignore
+        if "one-line punchy" in summary:
+            print("Found one-line punchy...")
+            summary = summary.replace("Here is one-line punchy sentence for Instagram with one suitable hashtag: ", "").strip()
+            summary = summary.replace("Here's a one-line punchy sentence for Instagram:", "").strip()
+        hashtag = ""
+        match = re.search(r'#[a-zA-Z0-9]+', summary)
+        if match:
+            hashtag = match.group(0)
+            summary = summary.replace(hashtag.strip(), "")
+            print(f"Hashtag: {hashtag}")
+        if "I need the actual headline" in summary:
+            summary = ""
+        print(f"News summary for image: {summary}")
+    except Exception as e:
+        print(f"Error parsing summary response: {e}\nResponse was: {response}")
     return summary, hashtag.strip()
 
 def write_post_description(news_summaries):
@@ -195,7 +206,7 @@ def translate_to_hindi(agent:AIAgent, text):
         print(f"Error while translating text to Hindi: {e}")
         return None
 
-def generate_post(agent:AIAgent):
+def generate_post(agent:AIAgent, models):
     print("🚀 Collecting news...")
     news_list = get_headlines(10)
     news_summaries = []
@@ -205,7 +216,7 @@ def generate_post(agent:AIAgent):
         try:
             title = news["title"]
             news_description = get_description(news["link"], title)
-            news_summary_for_image, hashtag = summarize_news_for_image(agent, title, news_description)
+            news_summary_for_image, hashtag = summarize_news_for_image(agent, title, news_description, model=models["summary_model"])
             # title_in_hindi = translate_to_hindi(agent, title)
             # news_summaries_for_image_in_hindi = translate_to_hindi(agent, news_summary_for_image)
             # language = "en"
@@ -241,11 +252,16 @@ def generate_post(agent:AIAgent):
     # print(f"✅ Success! images are ready in the '{IMAGE_DIR}' folder.")
 
 if __name__ == "__main__":
+    models = {
+        "summary_model": "llama3",
+        "image_generator_model": "sourceful/riverflow-v2-max-preview",
+    }
     api_key = None
     if os.getenv("RUN_LOCALLY", "False").lower() == "true":
         ai_provider = AIAgent.OLLAMA
     else:
         ai_provider = AIAgent.OPENROUTER
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key: str | None = os.getenv("OPENROUTER_API_KEY")
+        models["summary_model"] = "operrouter/free"
     agent = AIAgent(ai_provider=ai_provider, api_key=api_key)
-    generate_post(agent)
+    generate_post(agent, models)

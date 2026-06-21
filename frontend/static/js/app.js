@@ -563,7 +563,8 @@ async function checkAIStatus() {
         const container = elements.aiStatus;
         
         if (data.status === 'connected') {
-            container.innerHTML = `<i class="fas fa-circle"></i><span>AI: ${data.provider}</span>`;
+            const displayName = data.provider === 'ollama' ? 'Ollama (Local)' : 'OpenRouter (Cloud)';
+            container.innerHTML = `<i class="fas fa-circle"></i><span>AI: ${displayName}</span>`;
             container.classList.add('connected');
             container.classList.remove('disconnected');
         } else {
@@ -575,10 +576,19 @@ async function checkAIStatus() {
         // Update AI section
         const detail = document.getElementById('aiStatusDetail');
         if (detail) {
+            const currentModels = data.current_models ? `
+                <p><strong>Current Models:</strong></p>
+                <ul>
+                    <li>Summary: ${data.current_models.summary}</li>
+                    <li>Image: ${data.current_models.image}</li>
+                </ul>
+            ` : '';
+            
             detail.innerHTML = `
                 <p><strong>Provider:</strong> ${data.provider}</p>
                 <p><strong>Status:</strong> ${data.status}</p>
-                ${data.models?.length ? `<p><strong>Models:</strong> ${data.models.slice(0, 5).join(', ')}</p>` : ''}
+                ${currentModels}
+                ${data.models?.length ? `<p><strong>Available Models:</strong> ${data.models.slice(0, 5).join(', ')}</p>` : ''}
             `;
         }
         
@@ -590,9 +600,23 @@ async function checkAIStatus() {
     }
 }
 
-function setProvider(provider) {
-    showToast(`Provider set to ${provider}`, 'info');
-    // Note: This would need backend support to actually change the provider
+async function setProvider(provider) {
+    try {
+        showLoading('Switching AI provider...');
+        const response = await apiCall('/api/ai/provider', {
+            method: 'POST',
+            body: JSON.stringify({ provider })
+        });
+        
+        if (response.success) {
+            showToast(`Provider switched to ${provider}`, 'success');
+            await checkAIStatus();  // Refresh status
+        }
+    } catch (e) {
+        showToast(`Failed to switch provider: ${e.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
 }
 
 // ============================================
@@ -603,9 +627,9 @@ async function loadSettings() {
         const data = await apiCall('/api/settings');
         state.settings = data;
         
-        // Update UI
-        const runLocally = document.getElementById('runLocally');
-        if (runLocally) runLocally.checked = data.run_locally;
+        // Update AI provider buttons in settings section
+        document.getElementById('settingsOllamaBtn')?.classList.toggle('active', data.ai_provider === 'ollama');
+        document.getElementById('settingsOpenrouterBtn')?.classList.toggle('active', data.ai_provider === 'openrouter');
         
         const imageDir = document.getElementById('imageDir');
         if (imageDir) imageDir.value = data.image_dir;
@@ -614,15 +638,41 @@ async function loadSettings() {
         if (stagingUrl) stagingUrl.value = data.staging_url;
         
         const summaryModel = document.getElementById('summaryModel');
-        if (summaryModel) summaryModel.value = data.summary_model;
+        if (summaryModel && data.models) summaryModel.value = data.models.summary;
+        
+        const imageModel = document.getElementById('imageModel');
+        if (imageModel && data.models) imageModel.value = data.models.image;
         
         const translationModel = document.getElementById('translationModel');
-        if (translationModel) translationModel.value = data.translation_model;
+        if (translationModel && data.models) translationModel.value = data.models.translation;
         
         // Check Instagram connection
         checkInstagramConnection();
     } catch (e) {
         console.error(e);
+    }
+}
+
+async function updateModel(modelType, modelName) {
+    try {
+        const currentProvider = state.settings.ai_provider || 'ollama';
+        const models = {};
+        models[modelType] = modelName;
+        
+        const response = await apiCall('/api/ai/provider', {
+            method: 'POST',
+            body: JSON.stringify({ 
+                provider: currentProvider,
+                models: models
+            })
+        });
+        
+        if (response.success) {
+            showToast(`${modelType} model updated to ${modelName}`, 'success');
+            await loadSettings();  // Refresh settings
+        }
+    } catch (e) {
+        showToast(`Failed to update model: ${e.message}`, 'error');
     }
 }
 
