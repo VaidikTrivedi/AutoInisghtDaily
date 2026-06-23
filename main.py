@@ -14,12 +14,23 @@ from backend.upload import cleanup_server, upload_to_stage
 load_dotenv()
 
 if __name__ == "__main__":
+    models = {
+        "summary_model": "openrouter/free:free",
+        "image_model": "sourceful/riverflow-v2-fast",
+    }
     api_key = os.getenv("OPENROUTER_API_KEY") or None
     run_locally = os.getenv("RUN_LOCALLY", "False").lower() == "true"
-    ai_provider = AIAgent.OLLAMA if run_locally else AIAgent.OPENROUTER
+    
+    # Set provider based on RUN_LOCALLY
+    if run_locally:
+        ai_provider = AIAgent.OLLAMA
+        models["summary_model"] = "llama3"
+    else:
+        ai_provider = AIAgent.OPENROUTER
+    
     agent = AIAgent(ai_provider=ai_provider, api_key=api_key)
-    news_summaries = generate_post(agent)
-    generate_images(agent, news_summaries, run_locally=run_locally)
+    news_summaries = generate_post(agent, models["summary_model"])
+    generate_images(agent, news_summaries, run_locally=run_locally, image_model=models["image_model"])
     upload_to_stage()
     success = post_to_instagram()
     if success:

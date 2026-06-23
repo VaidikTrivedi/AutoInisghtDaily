@@ -17,7 +17,7 @@ class OpenRouterClient:
     def logUsage(self):
         return self.prompt_tokens, self.eval_tokens, self.prompt_tokens + self.eval_tokens, self.duration_ns
     
-    def generateAIResponse(self, prompt, model):
+    def generateAIResponse(self, prompt, model = "openrouter/free"):
         start_time = time.perf_counter()
         try:
             client = OpenAI(
@@ -31,7 +31,7 @@ class OpenRouterClient:
                 "X-OpenRouter-Title": "https://itrivedi.com", # Optional. Site title for rankings on openrouter.ai.
             },
             # model="openai/gpt-5.2",
-            model="qwen/qwen3.6-plus:free", 
+            model=model, 
             messages=[
                     {
                         "role": "user",
@@ -96,8 +96,7 @@ class OpenRouterClient:
             )
 
             response = client.chat.completions.create(
-                # model= "sourceful/riverflow-v2-fast",
-                model = "black-forest-labs/flux.2-klein-4b",
+                model = model,
                 messages=[
                         {
                             "role": "user",

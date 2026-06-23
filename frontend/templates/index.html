@@ -312,21 +312,36 @@
 
             <div class="settings-grid">
                 <div class="card settings-card">
-                    <h3><i class="fas fa-robot"></i> AI Settings</h3>
+                    <h3><i class="fas fa-robot"></i> AI Provider</h3>
+                    <div class="setting-item">
+                        <label>Active Provider</label>
+                        <div class="provider-toggle">
+                            <button class="provider-btn" id="settingsOllamaBtn" onclick="setProvider('ollama')">
+                                <i class="fas fa-server"></i> Ollama
+                            </button>
+                            <button class="provider-btn" id="settingsOpenrouterBtn" onclick="setProvider('openrouter')">
+                                <i class="fas fa-cloud"></i> OpenRouter
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card settings-card">
+                    <h3><i class="fas fa-cog"></i> AI Models</h3>
                     <div class="setting-item">
                         <label>Summary Model</label>
-                        <input type="text" id="summaryModel" value="llama3">
+                        <input type="text" id="summaryModel" value="llama3" onchange="updateModel('summary', this.value)">
+                        <small>Model used for news summarization</small>
+                    </div>
+                    <div class="setting-item">
+                        <label>Image Model</label>
+                        <input type="text" id="imageModel" value="sourceful/riverflow-v2-fast" onchange="updateModel('image', this.value)">
+                        <small>Model used for image generation</small>
                     </div>
                     <div class="setting-item">
                         <label>Translation Model</label>
                         <input type="text" id="translationModel" value="translategemma">
-                    </div>
-                    <div class="setting-item">
-                        <label>Run Locally</label>
-                        <label class="switch">
-                            <input type="checkbox" id="runLocally">
-                            <span class="slider"></span>
-                        </label>
+                        <small>Model used for Hindi translation</small>
                     </div>
                 </div>
 
