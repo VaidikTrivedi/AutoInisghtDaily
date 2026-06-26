@@ -17,8 +17,8 @@ class AIAgent:
     def getAIResponse(self, prompt, model):
         return self.api_provider.generateAIResponse(prompt, model)
     
-    def getAIImage(self, prompt, model):
-        return self.api_provider.generateAIImage(prompt, model)
+    def getAIImage(self, prompt, model, negative_prompt=None):
+        return self.api_provider.generateAIImage(prompt, model, negative_prompt)
 
     def getAIUsageStats(self):
         return self.api_provider.logUsage()

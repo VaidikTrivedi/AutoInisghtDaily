@@ -10,7 +10,7 @@ class OllamaClient:
 
     def logUsage(self):
         return self.prompt_tokens, self.eval_count, self.prompt_tokens + self.eval_count, self.duration_ns
-    
+
     def generateAIResponse(self, prompt, model):
         try:
             response = self.client.generate(model=model, prompt=prompt)
@@ -22,5 +22,5 @@ class OllamaClient:
             print(f"Error calling Ollama: {e.output}")
             return None
         
-    def generateAIImage(self, prompt, model):
+    def generateAIImage(self, prompt, model,  negative_prompt=None):
         return self.generateAIResponse(prompt, model)

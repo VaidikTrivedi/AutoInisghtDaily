@@ -812,6 +812,7 @@ body {
 }
 
 .image-card {
+    position: relative;
     background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
@@ -823,6 +824,25 @@ body {
 .image-card:hover {
     transform: translateY(-4px);
     box-shadow: var(--shadow-lg);
+}
+
+/* ponytail: checkbox + unselected state */
+.image-checkbox {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+}
+
+.image-checkbox input[type="checkbox"] {
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+}
+
+.image-card.unselected {
+    opacity: 0.5;
+    filter: grayscale(0.5);
 }
 
 .image-preview {

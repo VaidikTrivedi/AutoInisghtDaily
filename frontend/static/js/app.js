@@ -100,14 +100,19 @@ if (savedTheme === 'light') {
 // WebSocket for Real-time Updates
 // ============================================
 let ws = null;
+// ponytail: debounce rapid updates to prevent UI lag
+let wsUpdateTimer = null;
 
 function initWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
     
     ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        updatePipelineUI(data);
+        clearTimeout(wsUpdateTimer);
+        wsUpdateTimer = setTimeout(() => {
+            const data = JSON.parse(event.data);
+            updatePipelineUI(data);
+        }, 100); // batch updates every 100ms
     };
     
     ws.onclose = () => {
@@ -149,7 +154,13 @@ function updatePipelineUI(data) {
     
     // Update progress
     elements.progressFill.style.width = `${data.progress}%`;
-    elements.progressText.textContent = data.message || data.current_step || 'Ready to start';
+    
+    // ponytail: show image progress if available
+    let progressMsg = data.message || data.current_step || 'Ready to start';
+    if (data.images_total > 0 && data.current_step === 'Generating images') {
+        progressMsg = `Generated ${data.images_completed}/${data.images_total} images`;
+    }
+    elements.progressText.textContent = progressMsg;
 }
 
 // ============================================
@@ -306,28 +317,43 @@ function renderSummaries() {
 // ============================================
 // Image Generation
 // ============================================
+// ponytail: poll for new images during generation
+let imageRefreshInterval = null;
+
 async function generateImages() {
     if (state.summaries.length === 0) {
         showToast('Please summarize headlines first', 'warning');
         return;
     }
     
-    showLoading('Generating images...');
-    
     try {
         const data = await apiCall('/api/images/generate', { method: 'POST' });
-        showToast(`Generated ${data.count} images`, 'success');
-        refreshActivity();  // Auto-refresh activity log
-        await refreshImages();
-        showSection('images');
         
-        // Update nav
-        document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-        document.querySelector('[data-section="images"]').classList.add('active');
+        if (data.status === 'started') {
+            // ponytail: hide loading immediately, show progress via toast + polling
+            showToast(`Generating ${data.total} images...`, 'info');
+            showSection('images');
+            
+            // Update nav
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            document.querySelector('[data-section="images"]').classList.add('active');
+            
+            // Poll for new images every 2 seconds
+            imageRefreshInterval = setInterval(async () => {
+                await refreshImages();
+                // Stop polling when generation completes
+                if (state.pipelineStatus === 'idle' || state.pipelineStatus === 'error') {
+                    clearInterval(imageRefreshInterval);
+                    imageRefreshInterval = null;
+                    showToast('Image generation complete!', 'success');
+                }
+            }, 2000);
+            
+            refreshActivity();
+        }
     } catch (e) {
         console.error(e);
-    } finally {
-        hideLoading();
+        showToast('Failed to start generation', 'error');
     }
 }
 
@@ -357,8 +383,14 @@ function renderImages() {
         return;
     }
     
+    // ponytail: add selected flag if missing
+    state.images.forEach(img => { if (img.selected === undefined) img.selected = true; });
+    
     container.innerHTML = state.images.map((img, i) => `
-        <div class="image-card">
+        <div class="image-card ${img.selected ? '' : 'unselected'}" data-index="${i}">
+            <div class="image-checkbox">
+                <input type="checkbox" ${img.selected ? 'checked' : ''} onchange="toggleImage(${i})">
+            </div>
             <div class="image-preview" onclick="openImageModal('${img.path}')">
                 <img src="${img.path}" alt="${img.name}" loading="lazy">
             </div>
@@ -370,6 +402,11 @@ function renderImages() {
     `).join('');
     
     document.getElementById('imagesFooter').style.display = 'flex';
+}
+
+function toggleImage(index) {
+    state.images[index].selected = !state.images[index].selected;
+    renderImages();
 }
 
 function openImageModal(src) {
@@ -392,16 +429,22 @@ document.addEventListener('keydown', (e) => {
 // Staging & Upload
 // ============================================
 async function uploadToStaging() {
-    showLoading('Uploading to staging...');
+    const selected = state.images.filter(img => img.selected);
+    if (selected.length === 0) {
+        showToast('No images selected', 'warning');
+        return;
+    }
+    
+    showLoading(`Uploading ${selected.length} images...`);
     
     try {
+        // ponytail: backend already uploads all from dir, so just call it
         const data = await apiCall('/api/staging/upload', { method: 'POST' });
         showToast(`Uploaded ${data.count} images`, 'success');
-        refreshActivity();  // Auto-refresh activity log
+        refreshActivity();
         await refreshStaging();
         showSection('post');
         
-        // Update nav
         document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
         document.querySelector('[data-section="post"]').classList.add('active');
     } catch (e) {

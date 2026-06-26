@@ -54,7 +54,12 @@ class OpenRouterClient:
             return None
         
 
-    def getAIImage(self, prompt, model):
+    def getAIImage(self, prompt, model, negative_prompt=None):
+        # ponytail: add negative_prompt support if model accepts it
+        messages = [{"role": "user", "content": prompt}]
+        if negative_prompt:
+            messages.append({"role": "system", "content": f"Avoid: {negative_prompt}"})
+        
         response = requests.post(
         url="https://openrouter.ai/api/v1/chat/completions",
         headers={
@@ -63,12 +68,7 @@ class OpenRouterClient:
         },
         data=json.dumps({
             "model": model,
-            "messages": [
-                {
-                "role": "user",
-                "content": prompt
-                }
-            ],
+            "messages": messages,
             "modalities": ["image"]
         })
         )
@@ -87,13 +87,17 @@ class OpenRouterClient:
         return None
 
     
-    def generateAIImage(self, prompt, model = "sourceful/riverflow-v2-fast"):
+    def generateAIImage(self, prompt, model = "sourceful/riverflow-v2-fast", negative_prompt=None):
         start_time = time.perf_counter()
         try:
             client = OpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 api_key=self.api_key,
             )
+            
+            # ponytail: prepend negative constraints to main prompt
+            if negative_prompt:
+                prompt = f"{prompt}. NEVER include: {negative_prompt}"
 
             response = client.chat.completions.create(
                 model = model,

@@ -102,7 +102,9 @@ pipeline_state = {
     "progress": 0,
     "message": "",
     "last_run": None,
-    "error": None
+    "error": None,
+    "images_completed": 0,  # ponytail: track per-image progress
+    "images_total": 0
 }
 
 # AI Provider Configuration State
@@ -404,9 +406,71 @@ async def update_summary(index: int, summary: str, hashtag: str = ""):
     raise HTTPException(status_code=404, detail="Summary not found")
 
 # Image Generation
+async def _generate_images_background():
+    """Background task for image generation."""
+    global pipeline_state
+    
+    try:
+        agent = get_agent()
+        image_dir = os.getenv("IMAGE_DIR") or "insta_news_cards"
+        os.makedirs(image_dir, exist_ok=True)
+        generated_images = []
+        total = len(summaries_cache)
+        
+        for i, news in enumerate(summaries_cache):
+            pipeline_state["images_completed"] = i
+            pipeline_state["images_total"] = total
+            pipeline_state["progress"] = 60 + int((i / total) * 30)
+            pipeline_state["message"] = f"Generating image {i+1}/{total}"
+            await broadcast_state()
+            
+            # ponytail: retry per-image, not whole batch
+            for attempt in range(3):
+                try:
+                    image_bg_prompt = generate_background_image_prompt(agent, news["headline"])
+                    background_image = generate_background_image(agent, image_bg_prompt, model=ai_config["models"]["image"])
+                    
+                    if background_image:
+                        news_post = print_news_on_image(background_image, news["headline"], news["summary"])
+                        image_path = f"{image_dir}/post_{news['index']}.png"
+                        save_image(news_post, image_path)
+                        generated_images.append(image_path)
+                        
+                        log_activity(
+                            f"Generated image {i+1}/{total}", 
+                            "success", 
+                            {"index": i+1, "attempt": attempt+1, "file": f"post_{news['index']}.png"},
+                            step="generate"
+                        )
+                        break
+                except Exception as e:
+                    if attempt == 2:
+                        log_activity(f"Failed image {i+1} after 3 attempts", "error", {"error": str(e)}, step="generate")
+        
+        write_post_description(summaries_cache)
+        
+        pipeline_state["status"] = "idle"
+        pipeline_state["current_step"] = ""
+        pipeline_state["progress"] = 0
+        pipeline_state["message"] = ""
+        pipeline_state["images_completed"] = total
+        log_activity(
+            f"Completed image generation", 
+            "success", 
+            {"count": len(generated_images), "image_dir": image_dir},
+            step="generate"
+        )
+        await broadcast_state()
+        
+    except Exception as e:
+        pipeline_state["status"] = "error"
+        pipeline_state["error"] = str(e)
+        log_activity(f"Image generation failed: {e}", "error", {"error": str(e)}, step="generate")
+        await broadcast_state()
+
 @app.post("/api/images/generate")
-async def generate_all_images():
-    """Generate images for all summaries."""
+async def generate_all_images(background_tasks: BackgroundTasks):
+    """Start image generation in background."""
     global pipeline_state
     
     if not summaries_cache:
@@ -415,64 +479,15 @@ async def generate_all_images():
     pipeline_state["status"] = "running"
     pipeline_state["current_step"] = "Generating images"
     pipeline_state["progress"] = 60
+    pipeline_state["images_completed"] = 0
+    pipeline_state["images_total"] = len(summaries_cache)
     await broadcast_state()
     
     log_activity(f"Starting image generation for {len(summaries_cache)} summaries", "running", {"count": len(summaries_cache)}, step="generate")
     
-    try:
-        agent = get_agent()
-        image_dir = os.getenv("IMAGE_DIR") or "insta_news_cards"
-        os.makedirs(image_dir, exist_ok=True)
-        generated_images = []
-        
-        for i, news in enumerate(summaries_cache):
-            pipeline_state["progress"] = 60 + int((i / len(summaries_cache)) * 30)
-            pipeline_state["message"] = f"Generating image {i+1}/{len(summaries_cache)}"
-            await broadcast_state()
-            
-            # Generate background prompt and image
-            image_bg_prompt = generate_background_image_prompt(agent, news["headline"])
-            background_image = generate_background_image(agent, image_bg_prompt, model=ai_config["models"]["image"])
-            
-            if background_image:
-                news_post = print_news_on_image(background_image, news["headline"], news["summary"])
-                image_path = f"{image_dir}/post_{news['index']}.png"
-                save_image(news_post, image_path)
-                generated_images.append(image_path)
-                
-                log_activity(
-                    f"Generated image {i+1}/{len(summaries_cache)}", 
-                    "success", 
-                    {"index": i+1, "prompt_preview": (image_bg_prompt[:80] + "...") if image_bg_prompt else "N/A", "file": f"post_{news['index']}.png"},
-                    step="generate"
-                )
-        
-        # Write description file
-        write_post_description(summaries_cache)
-        
-        pipeline_state["status"] = "idle"
-        pipeline_state["current_step"] = ""
-        pipeline_state["progress"] = 0
-        pipeline_state["message"] = ""
-        log_activity(
-            f"Completed image generation", 
-            "success", 
-            {
-                "count": len(generated_images),
-                "image_dir": image_dir,
-                "files": [f"post_{s['index']}.png" for s in summaries_cache]
-            },
-            step="generate"
-        )
-        await broadcast_state()
-        
-        return {"success": True, "count": len(summaries_cache)}
-    except Exception as e:
-        pipeline_state["status"] = "error"
-        pipeline_state["error"] = str(e)
-        log_activity(f"Image generation failed: {e}", "error", {"error": str(e)}, step="generate")
-        await broadcast_state()
-        raise HTTPException(status_code=500, detail=str(e))
+    background_tasks.add_task(_generate_images_background)
+    
+    return {"success": True, "status": "started", "total": len(summaries_cache)}
 
 @app.get("/api/images")
 async def list_images():
@@ -742,7 +757,7 @@ async def run_full_pipeline(headline_limit: int = 8):
         await summarize_batch(BackgroundTasks())
         
         # Step 3: Generate images
-        await generate_all_images()
+        await generate_all_images(BackgroundTasks())
         
         # Step 4: Upload to staging
         await upload_to_staging()
