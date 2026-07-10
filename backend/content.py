@@ -55,19 +55,14 @@ def get_headlines(limit=10):
     
     # Updated, more reliable RSS feeds
     sources = {
+        'Sports-Football': 'https://worldsoccer.com/feed',
         'Finance/Trade': 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114',
         'Geo-Politics': 'https://feeds.bbci.co.uk/news/world/rss.xml',
         'Tech': 'https://techcrunch.com/feed/',
-
         'Sports-Cricket': 'https://crickettimes.com/feed',
-        'Sports-Football': 'https://worldsoccer.com/feed',
-
         'India': 'https://indianexpress.com/feed',
-
         'AI': 'https://openai.com/blog/rss.xml',
-
         'Innovation': 'https://newatlas.com/index.rss',
-
         'Positive-News': 'https://www.goodnewsnetwork.org/feed'
     }
 
