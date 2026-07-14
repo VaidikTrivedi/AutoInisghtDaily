@@ -31,8 +31,42 @@ from backend.post import post_to_instagram
 
 load_dotenv()
 
+# --- App Settings ---
+# Centralized, runtime-configurable settings
+app_settings = {
+    "ai_provider": os.getenv("AI_PROVIDER", AIAgent.OPENROUTER),
+    "summary_model": os.getenv("SUMMARY_MODEL", "openrouter/free"),
+    "image_model": os.getenv("IMAGE_MODEL", "sourceful/riverflow-v2-fast"),
+    "translation_model": os.getenv("TRANSLATION_MODEL", "translategemma"),
+    "run_locally": os.getenv("RUN_LOCALLY", "False").lower() == "true",
+}
+
 # --- State Persistence ---
 STATE_FILE = Path("pipeline_state.json")
+
+def _load_today_summaries_from_file() -> List[Dict]:
+    """Load today's summaries from news_summaries.json if available."""
+    image_dir = os.getenv("IMAGE_DIR") or "insta_news_cards"
+    summaries_file = Path(image_dir) / "news_summaries.json"
+    if not summaries_file.exists():
+        return []
+    try:
+        with open(summaries_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list) or not data:
+            return []
+
+        ts_raw = data[0].get("generated_at") if isinstance(data[0], dict) else None
+        if not ts_raw:
+            return []
+
+        ts_str = str(ts_raw).replace("Z", "+00:00")
+        if datetime.fromisoformat(ts_str).date() != datetime.now().date():
+            return []
+
+        return [item for item in data if isinstance(item, dict) and item.get("headline") and item.get("summary")]
+    except Exception:
+        return []
 
 def save_state():
     """Save current pipeline state to disk for persistence across restarts."""
@@ -103,19 +137,8 @@ pipeline_state = {
     "message": "",
     "last_run": None,
     "error": None,
-    "images_completed": 0,  # ponytail: track per-image progress
+    "images_completed": 0,
     "images_total": 0
-}
-
-# AI Provider Configuration State
-# Default to OpenRouter with free models
-ai_config = {
-    "provider": AIAgent.OPENROUTER,  # Default to OpenRouter
-    "models": {
-        "summary": "openrouter/free:free",  # OpenRouter free model
-        "translation": os.getenv("OLLAMA_TRANSLATION_MODEL", "translategemma"),
-        "image": "sourceful/riverflow-v2-fast"  # OpenRouter image model
-    }
 }
 
 activity_log: List[Dict] = []
@@ -155,8 +178,13 @@ class SettingsUpdate(BaseModel):
     auto_cleanup: Optional[bool] = None
 
 class AIProviderUpdate(BaseModel):
-    provider: str  # "ollama" or "openrouter"
-    models: Optional[Dict[str, str]] = None  # {"summary": "model_name", "image": "model_name"}
+    provider: str
+    models: Optional[Dict[str, str]] = None
+
+class AISettingsUpdate(BaseModel):
+    ai_provider: Optional[str] = None
+    summary_model: Optional[str] = None
+    image_model: Optional[str] = None
 
 # --- Helper Functions ---
 def log_activity(action: str, status: str = "success", details: Optional[Dict[str, Any]] = None, step: Optional[str] = None):
@@ -165,14 +193,13 @@ def log_activity(action: str, status: str = "success", details: Optional[Dict[st
         "timestamp": datetime.now().isoformat(),
         "action": action,
         "status": status,
-        "step": step,  # Pipeline step: fetch, summarize, generate, upload, post
+        "step": step,
         "details": details or {}
     }
     activity_log.insert(0, entry)
     if len(activity_log) > 100:
         activity_log.pop()
     
-    # Auto-save state after each activity (for persistence)
     if status in ["success", "error"]:
         save_state()
 
@@ -185,22 +212,19 @@ async def broadcast_state():
             pass
 
 def get_agent():
-    """Initialize AI agent based on current configuration."""
-    global ai_config
+    """Initialize AI agent based on current application settings."""
+    global app_settings
     
-    # Provider is already set to OPENROUTER by default
-    # Can be overridden by environment variable if needed
-    run_locally = os.getenv("RUN_LOCALLY", "False").lower() == "true"
-    if run_locally and ai_config["provider"] == AIAgent.OPENROUTER:
-        # Switch to Ollama if RUN_LOCALLY is set and we haven't explicitly chosen OpenRouter
-        ai_config["provider"] = AIAgent.OLLAMA
-        # Update models to Ollama-compatible ones
-        if ai_config["models"]["summary"].startswith("meta-llama") or "/" in ai_config["models"]["summary"]:
-            ai_config["models"]["summary"] = os.getenv("OLLAMA_SUMMARY_MODEL", "llama3")
-    
+    if app_settings["run_locally"] and app_settings["ai_provider"] == AIAgent.OPENROUTER:
+        if os.getenv("AI_PROVIDER") is None:
+             app_settings["ai_provider"] = AIAgent.OLLAMA
+
+    if app_settings["ai_provider"] == AIAgent.OLLAMA:
+        if "openrouter" in app_settings["summary_model"] or "/" in app_settings["summary_model"]:
+            app_settings["summary_model"] = os.getenv("OLLAMA_SUMMARY_MODEL", "llama3")
+
     api_key = os.getenv("OPENROUTER_API_KEY")
-    ai_provider = ai_config["provider"]
-    return AIAgent(ai_provider=ai_provider, api_key=api_key)
+    return AIAgent(ai_provider=app_settings["ai_provider"], api_key=api_key)
 
 # --- Page Routes ---
 @app.get("/", response_class=HTMLResponse)
@@ -265,7 +289,6 @@ async def fetch_headlines(limit: int = 10):
         headlines = get_headlines(limit)
         news_cache = [{"title": h["title"], "source": h["source"], "link": h["link"], "selected": True} for h in headlines]
         
-        # Group headlines by source
         sources = {}
         for h in headlines:
             src = h["source"]
@@ -277,11 +300,7 @@ async def fetch_headlines(limit: int = 10):
         log_activity(
             f"Fetched {len(headlines)} headlines", 
             "success", 
-            {
-                "count": len(headlines),
-                "sources": sources,
-                "headlines": [h["title"][:60] + "..." if len(h["title"]) > 60 else h["title"] for h in headlines[:5]]
-            },
+            {"count": len(headlines), "sources": sources},
             step="fetch"
         )
         await broadcast_state()
@@ -314,14 +333,13 @@ async def summarize_single(request: SummarizeRequest):
     try:
         agent = get_agent()
         description = request.description or request.headline
-        # Use the configured model from ai_config
-        summary, hashtag = summarize_news_for_image(agent, request.headline, description, model=ai_config["models"]["summary"])
+        summary, hashtag = summarize_news_for_image(agent, request.headline, description, model=app_settings["summary_model"])
         return {"summary": summary, "hashtag": hashtag}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/summarize/batch")
-async def summarize_batch(background_tasks: BackgroundTasks):
+async def summarize_batch():
     """Summarize all selected headlines."""
     global summaries_cache, pipeline_state
     
@@ -339,6 +357,7 @@ async def summarize_batch(background_tasks: BackgroundTasks):
     try:
         agent = get_agent()
         summaries_cache = []
+        run_timestamp = datetime.now().isoformat()
         
         for i, news in enumerate(selected):
             pipeline_state["progress"] = 20 + int((i / len(selected)) * 40)
@@ -346,8 +365,7 @@ async def summarize_batch(background_tasks: BackgroundTasks):
             await broadcast_state()
             
             description = get_description(news["link"], news["title"])
-            # Use the configured model from ai_config
-            summary, hashtag = summarize_news_for_image(agent, news["title"], description, model=ai_config["models"]["summary"])
+            summary, hashtag = summarize_news_for_image(agent, news["title"], description, model=app_settings["summary_model"])
             
             summaries_cache.append({
                 "index": i,
@@ -356,13 +374,13 @@ async def summarize_batch(background_tasks: BackgroundTasks):
                 "summary": summary,
                 "hashtag": hashtag,
                 "source": news["link"],
+                "generated_at": run_timestamp,
             })
             
-            # Log each summary completion
             log_activity(
                 f"Summarized: {news['title'][:50]}...", 
                 "success", 
-                {"index": i+1, "total": len(selected), "hashtag": hashtag},
+                {"index": i+1, "total": len(selected)},
                 step="summarize"
             )
         
@@ -370,13 +388,14 @@ async def summarize_batch(background_tasks: BackgroundTasks):
         pipeline_state["current_step"] = ""
         pipeline_state["progress"] = 0
         pipeline_state["message"] = ""
+        write_post_description(summaries_cache)
         log_activity(
             f"Completed summarization of {len(summaries_cache)} headlines", 
             "success", 
             {
                 "count": len(summaries_cache),
                 "ai_provider": agent.ai_provider,
-                "summaries": [{"title": s["headline"][:40], "hashtag": s["hashtag"]} for s in summaries_cache[:3]]
+                "model": app_settings["summary_model"]
             },
             step="summarize"
         )
@@ -418,17 +437,15 @@ async def _generate_images_background():
         total = len(summaries_cache)
         
         for i, news in enumerate(summaries_cache):
-            pipeline_state["images_completed"] = i
             pipeline_state["images_total"] = total
             pipeline_state["progress"] = 60 + int((i / total) * 30)
             pipeline_state["message"] = f"Generating image {i+1}/{total}"
             await broadcast_state()
             
-            # ponytail: retry per-image, not whole batch
             for attempt in range(3):
                 try:
                     image_bg_prompt = generate_background_image_prompt(agent, news["headline"])
-                    background_image = generate_background_image(agent, image_bg_prompt, model=ai_config["models"]["image"])
+                    background_image = generate_background_image(agent, image_bg_prompt, model=app_settings["image_model"])
                     
                     if background_image:
                         news_post = print_news_on_image(background_image, news["headline"], news["summary"])
@@ -446,6 +463,9 @@ async def _generate_images_background():
                 except Exception as e:
                     if attempt == 2:
                         log_activity(f"Failed image {i+1} after 3 attempts", "error", {"error": str(e)}, step="generate")
+            pipeline_state["images_completed"] = i + 1
+            pipeline_state["progress"] = 60 + int(((i + 1) / total) * 30)
+            await broadcast_state()
         
         write_post_description(summaries_cache)
         
@@ -538,7 +558,7 @@ async def upload_to_staging():
         log_activity(
             f"Uploaded {len(urls)} images to staging", 
             "success", 
-            {"count": len(urls), "urls": urls[:3] if len(urls) > 3 else urls},
+            {"count": len(urls)},
             step="upload"
         )
         await broadcast_state()
@@ -590,12 +610,7 @@ async def publish_to_instagram():
             cleanup_server()
             pipeline_state["status"] = "completed"
             pipeline_state["last_run"] = datetime.now().isoformat()
-            log_activity(
-                "Posted to Instagram successfully", 
-                "success", 
-                {"platform": "Instagram", "post_type": "carousel", "timestamp": datetime.now().isoformat()},
-                step="post"
-            )
+            log_activity("Posted to Instagram successfully", "success", step="post")
         else:
             pipeline_state["status"] = "error"
             pipeline_state["error"] = "Post failed"
@@ -628,76 +643,73 @@ async def get_instagram_status():
 @app.get("/api/settings")
 async def get_settings():
     """Get current settings."""
-    global ai_config
-    
-    # Initialize provider if not set
-    if ai_config["provider"] is None:
-        run_locally = os.getenv("RUN_LOCALLY", "False").lower() == "true"
-        ai_config["provider"] = AIAgent.OLLAMA if run_locally else AIAgent.OPENROUTER
+    global app_settings
     
     return {
-        "run_locally": os.getenv("RUN_LOCALLY", "False").lower() == "true",
-        "ai_provider": ai_config["provider"],
-        "models": ai_config["models"],
+        "run_locally": app_settings["run_locally"],
+        "ai_provider": app_settings["ai_provider"],
+        "summary_model": app_settings["summary_model"],
+        "image_model": app_settings["image_model"],
         "has_openrouter_key": bool(os.getenv("OPENROUTER_API_KEY")),
         "image_dir": os.getenv("IMAGE_DIR") or "insta_news_cards",
         "staging_url": os.getenv("STAGING_URL") or "",
         "has_instagram": bool(os.getenv("ACCESS_TOKEN") and os.getenv("IG_USER_ID")),
-        "summary_model": ai_config["models"]["summary"],
-        "translation_model": ai_config["models"]["translation"]
     }
+
+@app.post("/api/ai/settings")
+async def set_ai_settings(settings: AISettingsUpdate):
+    """Update AI provider and models."""
+    global app_settings
+    
+    if settings.ai_provider:
+        if settings.ai_provider not in [AIAgent.OLLAMA, AIAgent.OPENROUTER]:
+            raise HTTPException(status_code=400, detail=f"Invalid provider: {settings.ai_provider}")
+        if settings.ai_provider == AIAgent.OPENROUTER and not os.getenv("OPENROUTER_API_KEY"):
+            raise HTTPException(status_code=400, detail="OpenRouter API key not configured")
+        app_settings["ai_provider"] = settings.ai_provider
+
+    if settings.summary_model:
+        app_settings["summary_model"] = settings.summary_model
+    
+    if settings.image_model:
+        app_settings["image_model"] = settings.image_model
+
+    if settings.ai_provider and settings.summary_model is None:
+        if settings.ai_provider == AIAgent.OLLAMA:
+            app_settings["summary_model"] = os.getenv("OLLAMA_SUMMARY_MODEL", "llama3")
+        else:
+            app_settings["summary_model"] = "openrouter/free"
+
+    log_activity(
+        f"AI settings updated", 
+        "success", 
+        {"provider": app_settings['ai_provider'], "summary_model": app_settings['summary_model'], "image_model": app_settings['image_model']}
+    )
+    
+    return {"success": True, "settings": app_settings}
 
 @app.post("/api/ai/provider")
 async def set_ai_provider(config: AIProviderUpdate):
-    """Update AI provider and models."""
-    global ai_config
-    
-    # Validate provider
-    if config.provider not in [AIAgent.OLLAMA, AIAgent.OPENROUTER]:
-        raise HTTPException(status_code=400, detail=f"Invalid provider: {config.provider}")
-    
-    # Check if OpenRouter key exists when selecting openrouter
-    if config.provider == AIAgent.OPENROUTER and not os.getenv("OPENROUTER_API_KEY"):
-        raise HTTPException(status_code=400, detail="OpenRouter API key not configured")
-    
-    # Update provider
-    old_provider = ai_config["provider"]
-    ai_config["provider"] = config.provider
-    
-    # Update models if provided, otherwise set defaults based on provider
+    """(DEPRECATED) Update AI provider and models."""
+    update = AISettingsUpdate(ai_provider=config.provider)
     if config.models:
-        ai_config["models"].update(config.models)
-    elif old_provider != config.provider:
-        # Provider changed, set appropriate default models
-        if config.provider == AIAgent.OLLAMA:
-            ai_config["models"]["summary"] = os.getenv("OLLAMA_SUMMARY_MODEL", "llama3")
-        else:  # OpenRouter
-            ai_config["models"]["summary"] = "openrouter/free"
-    
-    log_activity(
-        f"AI provider changed to {config.provider}", 
-        "success", 
-        {"provider": config.provider, "models": ai_config["models"]}
-    )
-    
-    return {
-        "success": True,
-        "provider": ai_config["provider"],
-        "models": ai_config["models"]
-    }
+        if "summary" in config.models:
+            update.summary_model = config.models.get("summary")
+        if "image" in config.models:
+            update.image_model = config.models.get("image")
+            
+    return await set_ai_settings(update)
 
 @app.get("/api/ai/status")
 async def get_ai_status():
     """Check AI provider status."""
-    global ai_config
+    global app_settings
     
-    # Ensure provider is initialized
     get_agent()
     
-    current_provider = ai_config["provider"]
+    current_provider = app_settings["ai_provider"]
     
     if current_provider == AIAgent.OLLAMA:
-        # Check Ollama
         try:
             import requests
             response = requests.get("http://localhost:11434/api/tags", timeout=5)
@@ -706,17 +718,22 @@ async def get_ai_status():
                 "provider": "ollama",
                 "status": "connected",
                 "models": [m["name"] for m in models],
-                "current_models": ai_config["models"]
+                "current_models": {
+                    "summary": app_settings["summary_model"],
+                    "image": app_settings["image_model"]
+                }
             }
         except:
             return {
                 "provider": "ollama", 
                 "status": "disconnected", 
                 "models": [],
-                "current_models": ai_config["models"]
+                "current_models": {
+                    "summary": app_settings["summary_model"],
+                    "image": app_settings["image_model"]
+                }
             }
     else:
-        # Check OpenRouter
         has_key = bool(os.getenv("OPENROUTER_API_KEY"))
         return {
             "provider": "openrouter",
@@ -727,12 +744,15 @@ async def get_ai_status():
                 "qwen/qwen-2-7b-instruct:free",
                 "mistralai/mistral-7b-instruct:free"
             ] if has_key else [],
-            "current_models": ai_config["models"]
+            "current_models": {
+                "summary": app_settings["summary_model"],
+                "image": app_settings["image_model"]
+            }
         }
 
 # Full Pipeline
 @app.post("/api/pipeline/run")
-async def run_full_pipeline(headline_limit: int = 8):
+async def run_full_pipeline(background_tasks: BackgroundTasks, headline_limit: int = 8):
     """Run the full pipeline: fetch → summarize → generate → upload → post."""
     global pipeline_state
     
@@ -742,28 +762,59 @@ async def run_full_pipeline(headline_limit: int = 8):
     await broadcast_state()
     
     start_time = datetime.now()
-    log_activity(
-        "🚀 Starting full pipeline run", 
-        "running", 
-        {"headline_limit": headline_limit, "start_time": start_time.isoformat()},
-        step="pipeline"
-    )
+    log_activity("🚀 Starting full pipeline run", "running", {"headline_limit": headline_limit}, step="pipeline")
     
     try:
-        # Step 1: Fetch headlines
-        await fetch_headlines(headline_limit)
+        # Reuse today's summaries if available (resume from image generation onward)
+        cached_summaries = _load_today_summaries_from_file()
+        if cached_summaries:
+            summaries_cache.clear()
+            summaries_cache.extend(cached_summaries)
+            log_activity(
+                f"♻️ Reusing {len(summaries_cache)} summaries from today",
+                "success",
+                {"count": len(summaries_cache)},
+                step="summarize"
+            )
+        else:
+            # Step 1: Fetch headlines
+            await fetch_headlines(headline_limit)
+            while pipeline_state["status"] == "running":
+                await asyncio.sleep(0.1)
+            if pipeline_state["status"] == "error":
+                raise Exception(pipeline_state.get("error", "Fetch failed"))
+            
+            # Step 2: Summarize
+            await summarize_batch()
+            while pipeline_state["status"] == "running":
+                await asyncio.sleep(0.1)
+            if pipeline_state["status"] == "error":
+                raise Exception(pipeline_state.get("error", "Summarize failed"))
         
-        # Step 2: Summarize
-        await summarize_batch(BackgroundTasks())
-        
-        # Step 3: Generate images
-        await generate_all_images(BackgroundTasks())
-        
+        # Step 3: Generate images (run inline here; BackgroundTasks only run after response returns)
+        pipeline_state["status"] = "running"
+        pipeline_state["current_step"] = "Generating images"
+        pipeline_state["progress"] = 60
+        pipeline_state["images_completed"] = 0
+        pipeline_state["images_total"] = len(summaries_cache)
+        await broadcast_state()
+        await _generate_images_background()
+        if pipeline_state["status"] == "error":
+            raise Exception(pipeline_state.get("error", "Image generation failed"))
+
         # Step 4: Upload to staging
         await upload_to_staging()
+        while pipeline_state["status"] == "running":
+            await asyncio.sleep(0.1)
+        if pipeline_state["status"] == "error":
+            raise Exception(pipeline_state.get("error", "Upload failed"))
         
         # Step 5: Post to Instagram
-        result = await publish_to_instagram()
+        await publish_to_instagram()
+        while pipeline_state["status"] == "running":
+            await asyncio.sleep(0.1)
+        if pipeline_state["status"] == "error":
+            raise Exception(pipeline_state.get("error", "Post failed"))
         
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
@@ -773,13 +824,7 @@ async def run_full_pipeline(headline_limit: int = 8):
         log_activity(
             "✅ Full pipeline completed successfully", 
             "success", 
-            {
-                "duration_seconds": round(duration, 2),
-                "headlines_processed": len(news_cache),
-                "summaries_generated": len(summaries_cache),
-                "start_time": start_time.isoformat(),
-                "end_time": end_time.isoformat()
-            },
+            {"duration_seconds": round(duration, 2)},
             step="pipeline"
         )
         await broadcast_state()
@@ -844,7 +889,6 @@ async def clear_state():
         "error": None
     }
     
-    # Delete state file
     if STATE_FILE.exists():
         STATE_FILE.unlink()
     

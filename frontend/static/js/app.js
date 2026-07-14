@@ -12,7 +12,10 @@ const state = {
     images: [],
     stagingImages: [],
     settings: {},
-    pipelineStatus: 'idle'
+    pipelineStatus: 'idle',
+    pipelineStep: '',
+    imagesCompleted: 0,
+    imagesTotal: 0
 };
 
 // ============================================
@@ -102,6 +105,7 @@ if (savedTheme === 'light') {
 let ws = null;
 // ponytail: debounce rapid updates to prevent UI lag
 let wsUpdateTimer = null;
+let lastImageProgressRefresh = -1;
 
 function initWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -139,6 +143,9 @@ function startPolling() {
 
 function updatePipelineUI(data) {
     state.pipelineStatus = data.status;
+    state.pipelineStep = data.current_step || '';
+    state.imagesCompleted = data.images_completed || 0;
+    state.imagesTotal = data.images_total || 0;
     
     // Update status dot
     elements.statusDot.className = 'status-dot';
@@ -159,6 +166,12 @@ function updatePipelineUI(data) {
     let progressMsg = data.message || data.current_step || 'Ready to start';
     if (data.images_total > 0 && data.current_step === 'Generating images') {
         progressMsg = `Generated ${data.images_completed}/${data.images_total} images`;
+        if (lastImageProgressRefresh !== data.images_completed) {
+            lastImageProgressRefresh = data.images_completed;
+            refreshImages();
+        }
+    } else if (data.status !== 'running') {
+        lastImageProgressRefresh = -1;
     }
     elements.progressText.textContent = progressMsg;
 }
@@ -370,8 +383,9 @@ async function refreshImages() {
 
 function renderImages() {
     const container = document.getElementById('imagesGrid');
+    const isGeneratingImages = state.pipelineStatus === 'running' && state.pipelineStep === 'Generating images';
     
-    if (state.images.length === 0) {
+    if (state.images.length === 0 && !isGeneratingImages) {
         container.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-image"></i>
@@ -386,7 +400,7 @@ function renderImages() {
     // ponytail: add selected flag if missing
     state.images.forEach(img => { if (img.selected === undefined) img.selected = true; });
     
-    container.innerHTML = state.images.map((img, i) => `
+    const imageCards = state.images.map((img, i) => `
         <div class="image-card ${img.selected ? '' : 'unselected'}" data-index="${i}">
             <div class="image-checkbox">
                 <input type="checkbox" ${img.selected ? 'checked' : ''} onchange="toggleImage(${i})">
@@ -399,9 +413,26 @@ function renderImages() {
                 <p class="image-size">${formatBytes(img.size)}</p>
             </div>
         </div>
-    `).join('');
+    `);
+
+    if (isGeneratingImages && state.imagesTotal > state.images.length) {
+        const pendingCount = state.imagesTotal - state.images.length;
+        imageCards.push(...Array.from({ length: pendingCount }, (_, i) => `
+            <div class="image-card" data-pending="${i}">
+                <div class="image-preview" style="display:flex;align-items:center;justify-content:center;background:var(--bg-tertiary);color:var(--text-muted);">
+                    <i class="fas fa-spinner fa-spin"></i>
+                </div>
+                <div class="image-info">
+                    <p class="image-name">Generating image...</p>
+                    <p class="image-size">${state.imagesCompleted}/${state.imagesTotal} ready</p>
+                </div>
+            </div>
+        `));
+    }
+
+    container.innerHTML = imageCards.join('');
     
-    document.getElementById('imagesFooter').style.display = 'flex';
+    document.getElementById('imagesFooter').style.display = state.images.length > 0 ? 'flex' : 'none';
 }
 
 function toggleImage(index) {

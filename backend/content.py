@@ -111,7 +111,10 @@ def get_description(url, headline):
             group_elem = soup.find('p') or soup.find(class_="group")
             if group_elem:
                 text = group_elem.get_text(separator='', strip=True)
-                return text
+                if len(text.split(" ")) > 10:
+                    return text
+                else:
+                    return soup.text.replace("\n", " ")
             else:
                 main = soup.find("main") or soup.find(id="pcl-full-content") or soup.find(class_="td-post-content")
                 article = []
