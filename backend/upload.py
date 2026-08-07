@@ -39,6 +39,18 @@ def upload_all_images():
 
     return public_urls
 
+def upload_file_to_stage(file_path: str):
+    """Uploads a single file to staging and returns its public URL."""
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    with open(file_path, "rb") as f:
+        files = {"file": f}
+        response = requests.post(f"{STAGING_URL}?action=upload", files=files)
+    if response.status_code != 200:
+        raise ConnectionError(f"Failed to upload file: {response.text}")
+    data = response.json()
+    return data["public_url"]
+
 def get_images():
     """Fetches the list of files currently on the server."""
     print("\nVerifying server state...")

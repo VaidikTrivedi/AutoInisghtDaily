@@ -101,6 +101,24 @@ def post_to_instagram():
         print(f"Error while uploading - {e}")
         return False
 
+def post_video_to_instagram(video_url: str, caption: str = ""):
+    if ACCESS_TOKEN is None or IG_USER_ID is None or GRAPH_VERSION is None:
+        raise ValueError("Access Token or UserID or Graph Version is missing, Check your .env file")
+    url = f"{BASE_URL}/{IG_USER_ID}/media"
+    payload = {
+        "media_type": "REELS",
+        "video_url": video_url,
+        "caption": caption,
+        "access_token": ACCESS_TOKEN
+    }
+    resp = requests.post(url, data=payload).json()
+    if "id" not in resp:
+        raise ValueError(f"Failed to create reel container: {resp}")
+    container_id = resp["id"]
+    poll_status(container_id, max_wait=600)
+    media_id = publish(container_id)
+    return media_id
+
 
 if __name__ == "__main__":
     post_to_instagram()

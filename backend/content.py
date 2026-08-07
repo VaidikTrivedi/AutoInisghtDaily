@@ -65,6 +65,10 @@ def get_headlines(limit=10):
         'Innovation': 'https://newatlas.com/index.rss',
         'Positive-News': 'https://www.goodnewsnetwork.org/feed'
     }
+    if os.getenv("SINGLE_NEWS_TEST", "false").lower() == "true":
+        first_category = next(iter(sources))
+        sources = {first_category: sources[first_category]}
+        limit = 1
 
     category_source_mapping = {
         'Finance/Trade': 'CNBC',
@@ -179,7 +183,31 @@ def summarize_news_for_image(agent:AIAgent, headline, news_description, model=No
         print(f"Error parsing summary response: {e}\nResponse was: {response}")
     return summary, hashtag.strip()
 
+def _summary_word_count(text: str) -> int:
+    return len(re.findall(r"\b[\w'-]+\b", text or ""))
+
+def _is_invalid_summary_text(text: str) -> bool:
+    summary = (text or "").strip()
+    if not summary:
+        return True
+    if re.search(r"\b(safe\s*type|type\s*safe)\b", summary, flags=re.IGNORECASE):
+        return True
+    return _summary_word_count(summary) < 10
+
+def filter_news_summaries(news_summaries):
+    filtered = []
+    removed = 0
+    for item in news_summaries:
+        if _is_invalid_summary_text(str(item.get("summary", ""))):
+            removed += 1
+            continue
+        filtered.append(item)
+    if removed:
+        print(f"Filtered out {removed} invalid summaries")
+    return filtered
+
 def write_post_description(news_summaries):
+    news_summaries = filter_news_summaries(news_summaries)
     with open(f"{IMAGE_DIR}/description.txt", "w", encoding="utf-8") as f:
         for summary in news_summaries:
             # f.write(f"{summary['index']+1} - {summary['hashtags']} - source: ${summary['news_source']}\n")
@@ -189,6 +217,7 @@ def write_post_description(news_summaries):
             f.write(f"\n{summary['index']+1}. {summary['source']}")
     with open(f"{IMAGE_DIR}/news_summaries.json", "w", encoding="utf-8") as f:
         f.write(json.dumps(news_summaries, ensure_ascii=False, indent=2))
+    return news_summaries
 
 def translate_to_hindi(agent:AIAgent, text):
     prompt = f"""
@@ -235,7 +264,7 @@ def generate_post(agent:AIAgent, models):
         except Exception as e:
             print(f"Error while summarizing story for headline: ${news} - {e}")
 
-    write_post_description(news_summaries)
+    news_summaries = write_post_description(news_summaries)
 
     print("\n" + "="*40)
     print("📈 FINAL AI MODEL TOKEN USAGE SUMMARY")

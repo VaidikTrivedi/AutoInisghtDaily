@@ -11,6 +11,10 @@ const state = {
     summaries: [],
     images: [],
     stagingImages: [],
+    videoVoices: [],
+    videoTaskId: '',
+    videoTaskState: null,
+    videoUrls: [],
     settings: {},
     pipelineStatus: 'idle',
     pipelineStep: '',
@@ -44,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadInitialData();
     checkAIStatus();
     loadSettings();
+    loadVideoVoices();
 });
 
 // ============================================
@@ -77,6 +82,8 @@ function showSection(sectionName) {
     if (sectionName === 'images') refreshImages();
     if (sectionName === 'post') refreshStaging();
     if (sectionName === 'settings') loadSettings();
+    if (sectionName === 'video') loadVideoVoices();
+    if (sectionName === 'video' && state.videoTaskId) startVideoTaskPolling(state.videoTaskId);
 }
 
 function toggleSidebar() {
@@ -332,6 +339,7 @@ function renderSummaries() {
 // ============================================
 // ponytail: poll for new images during generation
 let imageRefreshInterval = null;
+let videoTaskPollInterval = null;
 
 async function generateImages() {
     if (state.summaries.length === 0) {
@@ -367,6 +375,138 @@ async function generateImages() {
     } catch (e) {
         console.error(e);
         showToast('Failed to start generation', 'error');
+    }
+}
+
+async function generateVideo() {
+    showLoading('Generating script...');
+    const resultEl = document.getElementById('videoGenerateResult');
+    const voiceInput = document.getElementById('videoVoiceName');
+    const voiceName = (voiceInput?.value || 'en-US-JennyNeural-Female').trim() || 'en-US-JennyNeural-Female';
+    if (resultEl) resultEl.textContent = '';
+
+    try {
+        const scriptData = await apiCall('/api/script/generate', { method: 'POST' });
+        showLoading('Starting video generation...');
+
+        const videoData = await apiCall('/api/video/generate', {
+            method: 'POST',
+            body: JSON.stringify({
+                script: scriptData.script,
+                subject: 'Daily News Update',
+                video_aspect: '9:16',
+                video_count: 1,
+                voice_name: voiceName
+            })
+        });
+
+        state.videoTaskId = videoData.task_id || '';
+        if (resultEl && state.videoTaskId) {
+            resultEl.innerHTML = `Task started: <code>${state.videoTaskId}</code>`;
+        }
+        startVideoTaskPolling(state.videoTaskId);
+        showToast('Video task started', 'success');
+        refreshActivity();
+    } catch (e) {
+        console.error(e);
+    } finally {
+        hideLoading();
+    }
+}
+
+async function loadVideoVoices() {
+    const voiceSelect = document.getElementById('videoVoiceName');
+    if (!voiceSelect) return;
+    try {
+        const data = await apiCall('/api/video/voices');
+        const voices = Array.isArray(data.voices) ? data.voices : [];
+        if (voices.length === 0) return;
+        const defaultVoice = data.default_voice || 'en-US-JennyNeural-Female';
+        const currentValue = voiceSelect.value || defaultVoice;
+        state.videoVoices = voices;
+        voiceSelect.innerHTML = voices
+            .map(v => `<option value="${v}">${v}</option>`)
+            .join('');
+        voiceSelect.value = voices.includes(currentValue) ? currentValue : defaultVoice;
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+function startVideoTaskPolling(taskId) {
+    if (!taskId) return;
+    if (videoTaskPollInterval) {
+        clearInterval(videoTaskPollInterval);
+        videoTaskPollInterval = null;
+    }
+    fetchVideoTaskStatus(taskId);
+    videoTaskPollInterval = setInterval(async () => {
+        const done = await fetchVideoTaskStatus(taskId);
+        if (done) {
+            clearInterval(videoTaskPollInterval);
+            videoTaskPollInterval = null;
+        }
+    }, 5000);
+}
+
+async function fetchVideoTaskStatus(taskId) {
+    try {
+        const data = await apiCall(`/api/video/task/${taskId}`);
+        state.videoTaskState = data.state;
+        state.videoUrls = data.videos || [];
+        const statusEl = document.getElementById('videoTaskStatus');
+        const publishBtn = document.getElementById('publishVideoBtn');
+        const player = document.getElementById('generatedVideoPlayer');
+        const progress = data.progress ?? 0;
+        if (statusEl) {
+            if (data.state === 1) {
+                statusEl.textContent = `Video ready (100%). Task: ${taskId}`;
+            } else if (data.state === -1) {
+                statusEl.textContent = `Video generation failed. Task: ${taskId}`;
+            } else {
+                statusEl.textContent = `Video generation in progress (${progress}%). Task: ${taskId}`;
+            }
+        }
+        if (data.state === 1 && state.videoUrls.length > 0 && player) {
+            if (!player.src || !player.src.endsWith(state.videoUrls[0])) {
+                player.src = state.videoUrls[0];
+            }
+            player.style.display = 'block';
+            if (publishBtn) publishBtn.disabled = false;
+            return true;
+        }
+        if (data.state === -1) return true;
+        return false;
+    } catch (e) {
+        console.error(e);
+        return false;
+    }
+}
+
+async function publishVideoToInstagram() {
+    if (!state.videoTaskId) {
+        showToast('No video task found', 'warning');
+        return;
+    }
+    const caption = (document.getElementById('videoCaption')?.value || '').trim();
+    const resultEl = document.getElementById('videoPublishResult');
+    showLoading('Publishing video to Instagram...');
+    try {
+        const data = await apiCall('/api/video/publish', {
+            method: 'POST',
+            body: JSON.stringify({
+                task_id: state.videoTaskId,
+                caption: caption || null
+            })
+        });
+        if (resultEl) {
+            resultEl.innerHTML = `Published! Media ID: <code>${data.media_id}</code>`;
+        }
+        showToast('Video published to Instagram', 'success');
+    } catch (e) {
+        console.error(e);
+    } finally {
+        hideLoading();
     }
 }
 
@@ -729,7 +869,7 @@ async function loadSettings() {
 
 async function updateModel(modelType, modelName) {
     try {
-        const currentProvider = state.settings.ai_provider || 'ollama';
+        const currentProvider = state.settings.ai_provider || 'openrouter';
         const models = {};
         models[modelType] = modelName;
         

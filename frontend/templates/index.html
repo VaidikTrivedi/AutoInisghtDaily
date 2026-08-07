@@ -34,6 +34,10 @@
                 <i class="fas fa-robot"></i>
                 <span>AI Processing</span>
             </a>
+            <a href="#" class="nav-item" data-section="video">
+                <i class="fas fa-video"></i>
+                <span>Video</span>
+            </a>
             <a href="#" class="nav-item" data-section="images">
                 <i class="fas fa-images"></i>
                 <span>Images</span>
@@ -97,6 +101,9 @@
                     </button>
                     <button class="btn btn-secondary" onclick="fetchHeadlines()">
                         <i class="fas fa-download"></i> Fetch News
+                    </button>
+                    <button class="btn btn-secondary" onclick="showSection('video')">
+                        <i class="fas fa-video"></i> Generate Video
                     </button>
                     <button class="btn btn-secondary" onclick="showSection('images')">
                         <i class="fas fa-images"></i> View Images
@@ -206,10 +213,10 @@
             <div class="ai-config card">
                 <h3>AI Provider</h3>
                 <div class="provider-toggle">
-                    <button class="provider-btn active" id="ollamaBtn" onclick="setProvider('ollama')">
+                    <button class="provider-btn" id="ollamaBtn" onclick="setProvider('ollama')">
                         <i class="fas fa-server"></i> Ollama (Local)
                     </button>
-                    <button class="provider-btn" id="openrouterBtn" onclick="setProvider('openrouter')">
+                    <button class="provider-btn active" id="openrouterBtn" onclick="setProvider('openrouter')">
                         <i class="fas fa-cloud"></i> OpenRouter
                     </button>
                 </div>
@@ -230,6 +237,44 @@
                 <button class="btn btn-primary" onclick="generateImages()">
                     <i class="fas fa-wand-magic-sparkles"></i> Generate Images
                 </button>
+            </div>
+        </section>
+
+        <!-- Video Section -->
+        <section class="section" id="videoSection">
+            <div class="section-header">
+                <h2><i class="fas fa-video"></i> MoneyPrinterTurbo Video</h2>
+            </div>
+
+            <div class="card">
+                <h3><i class="fas fa-film"></i> Create Video from Summaries</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 12px;">Uses current summaries and runs the embedded MoneyPrinterTurbo flow.</p>
+                <div class="setting-item" style="margin-bottom: 12px;">
+                    <label for="videoVoiceName">Voice Name</label>
+                    <select id="videoVoiceName">
+                        <option value="en-US-JennyNeural-Female" selected>en-US-JennyNeural-Female</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary" onclick="generateVideo()">
+                    <i class="fas fa-film"></i> Generate Video
+                </button>
+                <div id="videoGenerateResult" style="margin-top: 12px; color: var(--text-secondary);"></div>
+            </div>
+            <div class="card">
+                <h3><i class="fas fa-play-circle"></i> Generated Video</h3>
+                <p id="videoTaskStatus" style="color: var(--text-secondary); margin-bottom: 12px;">No video task yet.</p>
+                <video id="generatedVideoPlayer" controls style="width:100%; max-height:520px; background:#000; border-radius:10px; display:none;"></video>
+            </div>
+            <div class="card">
+                <h3><i class="fab fa-instagram"></i> Publish Video</h3>
+                <div class="setting-item" style="margin-bottom: 12px;">
+                    <label for="videoCaption">Caption (optional)</label>
+                    <textarea id="videoCaption" rows="4" placeholder="If empty, description.txt caption will be used"></textarea>
+                </div>
+                <button class="btn btn-primary" id="publishVideoBtn" onclick="publishVideoToInstagram()" disabled>
+                    <i class="fas fa-paper-plane"></i> Publish Video to Instagram
+                </button>
+                <div id="videoPublishResult" style="margin-top: 12px; color: var(--text-secondary);"></div>
             </div>
         </section>
 
@@ -330,7 +375,7 @@
                     <h3><i class="fas fa-cog"></i> AI Models</h3>
                     <div class="setting-item">
                         <label>Summary Model</label>
-                        <input type="text" id="summaryModel" value="llama3" onchange="updateModel('summary', this.value)">
+                        <input type="text" id="summaryModel" value="openrouter/free" onchange="updateModel('summary', this.value)">
                         <small>Model used for news summarization</small>
                     </div>
                     <div class="setting-item">

@@ -22,12 +22,28 @@ from dotenv import load_dotenv
 
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
+MPT_DIR = Path(__file__).resolve().parent / "news_video_engine"
+if MPT_DIR.exists():
+    sys.path.insert(0, str(MPT_DIR))
 
 from backend.agent import AIAgent
-from backend.content import get_headlines, summarize_news_for_image, get_description, write_post_description, stats
+from backend.content import get_headlines, summarize_news_for_image, get_description, write_post_description, filter_news_summaries, stats
 from backend.image_generator import generate_images, generate_background_image_prompt, generate_background_image, print_news_on_image, save_image
-from backend.upload import upload_all_images, get_images, cleanup_server, upload_to_stage
-from backend.post import post_to_instagram
+from backend.upload import upload_all_images, get_images, cleanup_server, upload_to_stage, upload_file_to_stage
+from backend.post import post_to_instagram, post_video_to_instagram, read_caption
+from news_video_engine.app.controllers.v1.video import create_task as mpt_create_task
+from news_video_engine.app.models.schema import TaskVideoRequest
+from news_video_engine.app.config import config as mpt_config
+from news_video_engine.app.services import state as mpt_state
+from news_video_engine.app.utils import utils as mpt_utils
+from news_video_engine.app.services.voice import (
+    get_all_azure_voices,
+    get_chatterbox_voices,
+    get_elevenlabs_voices,
+    get_gemini_voices,
+    get_mimo_voices,
+    get_siliconflow_voices,
+)
 
 load_dotenv()
 
@@ -185,6 +201,21 @@ class AISettingsUpdate(BaseModel):
     ai_provider: Optional[str] = None
     summary_model: Optional[str] = None
     image_model: Optional[str] = None
+
+class GenerateVideoRequest(BaseModel):
+    script: str
+    subject: str = "Daily News Update"
+    video_aspect: str = "9:16"
+    video_count: int = 1
+    voice_name: str = "en-US-JennyNeural-Female"
+
+class PublishVideoRequest(BaseModel):
+    task_id: str
+    caption: Optional[str] = None
+
+def _csv_env(name: str) -> list[str]:
+    raw = os.getenv(name, "")
+    return [v.strip() for v in raw.split(",") if v.strip()]
 
 # --- Helper Functions ---
 def log_activity(action: str, status: str = "success", details: Optional[Dict[str, Any]] = None, step: Optional[str] = None):
@@ -388,6 +419,7 @@ async def summarize_batch():
         pipeline_state["current_step"] = ""
         pipeline_state["progress"] = 0
         pipeline_state["message"] = ""
+        summaries_cache = filter_news_summaries(summaries_cache)
         write_post_description(summaries_cache)
         log_activity(
             f"Completed summarization of {len(summaries_cache)} headlines", 
@@ -423,6 +455,145 @@ async def update_summary(index: int, summary: str, hashtag: str = ""):
             summaries_cache[index]["hashtag"] = hashtag
         return {"success": True, "summary": summaries_cache[index]}
     raise HTTPException(status_code=404, detail="Summary not found")
+
+@app.post("/api/script/generate")
+async def generate_script_from_summaries():
+    """Generate a narration script from cached/file summaries."""
+    global summaries_cache
+    summaries = summaries_cache or _load_today_summaries_from_file()
+    summaries = filter_news_summaries(summaries)
+    if summaries:
+        summaries_cache = summaries
+        write_post_description(summaries_cache)
+    if not summaries:
+        raise HTTPException(status_code=400, detail="No summaries found in cache or news_summaries.json")
+
+    lines = [f"Headline {i + 1}: {item['headline']}. {item['summary']}" for i, item in enumerate(summaries)]
+    script = " ".join(lines)
+    return {"script": script, "items": len(summaries)}
+
+def _configure_money_printer_openrouter():
+    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="OPENROUTER_API_KEY is required for video generation")
+    mpt_config.app["llm_provider"] = "openai"
+    mpt_config.app["openai_api_key"] = api_key
+    mpt_config.app["openai_base_url"] = "https://openrouter.ai/api/v1"
+    mpt_config.app["openai_model_name"] = os.getenv("MPT_OPENROUTER_MODEL", "openrouter/free")
+    mpt_config.app["pexels_api_keys"] = _csv_env("MPT_PEXELS_API_KEYS")
+    mpt_config.app["twelvelabs_api_keys"] = _csv_env("MPT_TWELVELABS_API_KEYS")
+    mpt_config.app["pixabay_api_keys"] = _csv_env("MPT_PIXABAY_API_KEYS")
+    mpt_config.app["coverr_api_keys"] = _csv_env("MPT_COVERR_API_KEYS")
+
+
+@app.post("/api/video/generate")
+async def generate_video_with_money_printer(http_request: Request, request: GenerateVideoRequest):
+    """Generate video using embedded MoneyPrinterTurbo logic."""
+    script = request.script.strip()
+    if not script:
+        raise HTTPException(status_code=400, detail="script is required")
+    try:
+        _configure_money_printer_openrouter()
+        payload = mpt_create_task(
+            http_request,
+            TaskVideoRequest(
+                video_subject=request.subject.strip() or "Daily News Update",
+                video_script=script,
+                video_aspect=request.video_aspect, # type: ignore
+                video_count=request.video_count,
+                voice_name=request.voice_name.strip() or "en-US-JennyNeural-Female",
+            ),
+            stop_at="video",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if isinstance(payload, dict):
+        task_id = (payload.get("data") or {}).get("task_id") # type: ignore
+    else:
+        # Handle cases where payload might not be a dictionary
+        task_id = None
+    return {
+        "success": True,
+        "task_id": task_id,
+        "money_printer_response": payload,
+    }
+
+def _video_url_from_task_output(task_id: str, file_path: str) -> Optional[str]:
+    task_dir = (Path(mpt_utils.task_dir()) / task_id).resolve()
+    p = Path(file_path).resolve()
+    if not p.exists():
+        return None
+    if task_dir not in p.parents and p != task_dir:
+        return None
+    return f"/api/video/file/{task_id}/{p.name}"
+
+@app.get("/api/video/task/{task_id}")
+async def get_video_task(task_id: str):
+    task = mpt_state.state.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Video task not found")
+    videos = task.get("videos", []) or []
+    video_urls = []
+    for v in videos: # type: ignore
+        if isinstance(v, str):
+            u = _video_url_from_task_output(task_id, v)
+            if u:
+                video_urls.append(u)
+    return {
+        "task_id": task_id,
+        "state": task.get("state"),
+        "progress": task.get("progress", 0),
+        "videos": video_urls,
+        "raw_videos": videos,
+    }
+
+@app.get("/api/video/file/{task_id}/{filename}")
+async def get_video_file(task_id: str, filename: str):
+    task_dir = (Path(mpt_utils.task_dir()) / task_id).resolve()
+    file_path = (task_dir / filename).resolve()
+    if task_dir not in file_path.parents:
+        raise HTTPException(status_code=403, detail="Invalid file path")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Video file not found")
+    return FileResponse(str(file_path))
+
+@app.post("/api/video/publish")
+async def publish_video_to_instagram(request: PublishVideoRequest):
+    task = mpt_state.state.get_task(request.task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Video task not found")
+    videos = task.get("videos", []) or []
+    if not videos:
+        raise HTTPException(status_code=400, detail="No generated video found for this task")
+    if task.get("state") != 1:
+        raise HTTPException(status_code=400, detail="Video task is not complete yet")
+
+    first_video = videos[0] # type: ignore
+    if not isinstance(first_video, str):
+        raise HTTPException(status_code=400, detail="Invalid video output path")
+    try:
+        public_url = upload_file_to_stage(first_video)
+        caption = request.caption if request.caption is not None else read_caption().strip()
+        media_id = post_video_to_instagram(public_url, caption=caption or "")
+        return {"success": True, "media_id": media_id, "video_url": public_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/video/voices")
+async def get_video_voices():
+    default_voice = "en-US-JennyNeural-Female"
+    voices = [default_voice]
+    voices.extend(get_all_azure_voices())
+    voices.extend(get_siliconflow_voices())
+    voices.extend(get_gemini_voices())
+    voices.extend(get_mimo_voices())
+    voices.extend(get_chatterbox_voices())
+    voices.extend(get_elevenlabs_voices(mpt_config.elevenlabs.get("api_key", "")))
+    deduped = sorted(set(v for v in voices if v))
+    if default_voice in deduped:
+        deduped.remove(default_voice)
+    return {"default_voice": default_voice, "voices": [default_voice, *deduped]}
 
 # Image Generation
 async def _generate_images_background():
@@ -491,8 +662,11 @@ async def _generate_images_background():
 @app.post("/api/images/generate")
 async def generate_all_images(background_tasks: BackgroundTasks):
     """Start image generation in background."""
-    global pipeline_state
+    global pipeline_state, summaries_cache
     
+    summaries_cache = filter_news_summaries(summaries_cache)
+    if summaries_cache:
+        write_post_description(summaries_cache)
     if not summaries_cache:
         raise HTTPException(status_code=400, detail="No summaries to generate images for")
     

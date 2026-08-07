@@ -22,7 +22,7 @@ jiter==0.13.0
 pillow==12.1.1
 imageio==2.37.2
 imageio-ffmpeg==0.6.0
-moviepy==1.0.3
+moviepy==2.2.1
 numpy==2.4.2
 
 # Instagram/Social
@@ -32,6 +32,11 @@ instabot==0.117.0
 # AI/LLM clients
 openai==2.43.0
 ollama==0.6.1
+edge-tts==7.2.7
+faster-whisper==1.1.0
+google-genai==2.11.0
+dashscope==1.20.14
+litellm==1.86.2
 
 # Utilities
 beautifulsoup4==4.14.3
@@ -40,6 +45,12 @@ schedule==1.2.2
 rich==15.0.0
 typer==0.24.1
 click==8.3.2
+loguru==0.7.3
+redis==5.2.0
+pydub==0.25.1
+socksio==1.0.0
+onnxruntime==1.16.3
+toml==0.10.2
 
 # Template engine
 jinja2==3.1.6
@@ -69,3 +80,4 @@ PySocks==1.7.1
 pytz==2025.2
 PyYAML==6.0.3
 tqdm==4.67.3
+azure-cognitiveservices-speech==1.41.1
