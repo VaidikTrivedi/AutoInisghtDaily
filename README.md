@@ -1,6 +1,6 @@
 # AutoInsightDaily
 
-**AutoInsightDaily** is an automated pipeline for generating, summarizing, and posting news updates as visually engaging Instagram carousel posts. It fetches headlines from trusted sources, summarizes them using AI (locally via Ollama or via OpenRouter API), creates styled images, uploads them to a staging server, and publishes them to Instagram via the Graph API.
+**AutoInsightDaily** is an automated pipeline for generating, summarizing, and posting news updates as Instagram content. It supports both image carousels and short news videos, with a FastAPI backend + web dashboard for end-to-end control.
 
 ## Features
 
@@ -16,8 +16,13 @@
 - Summarizes news using AI (supports both local Ollama and cloud-based OpenRouter)
 - AI-powered image generation with themed styling (finance, tech, politics, general)
 - Generates Instagram-ready images with custom fonts and themes
+- Generates short news videos from summaries using the embedded `news_video_engine`
+- Voice selection dropdown in UI (default + provider voices)
+- Built-in video task polling, video preview, and Reels publishing from the dashboard
 - Uploads images to a staging server for public access
 - Posts carousels to Instagram using the Graph API
+- Posts generated videos to Instagram Reels via Graph API
+- Validates and filters bad summaries before image/video generation
 - Cleans up staging server and local files after posting
 
 ## Requirements
@@ -61,6 +66,9 @@
    # AI Provider Configuration
    RUN_LOCALLY=true                    # Set to 'true' for Ollama, 'false' for OpenRouter
    OPENROUTER_API_KEY=your_openrouter_api_key  # Required if RUN_LOCALLY=false
+   MPT_OPENROUTER_MODEL=openrouter/free
+   MPT_PEXELS_API_KEYS=key1,key2
+   MPT_TWELVELABS_API_KEYS=key1,key2
    OLLAMA_SUMMARY_MODEL=llama3
    OLLAMA_TRANSLATION_MODEL=translategemma
 
@@ -82,6 +90,23 @@
 
 ## Usage
 
+### Web dashboard (recommended)
+
+Run API + UI:
+
+```bash
+uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Then open `http://localhost:8000` and run:
+1. Fetch headlines
+2. Summarize selected headlines
+3. Generate images **or** generate video
+4. Preview output
+5. Publish to Instagram (carousel or Reels)
+
+### CLI pipeline
+
 Run the main pipeline:
 
 ```bash
@@ -100,18 +125,13 @@ This will:
 
 ```
 AutoInsightDaily/
-├── main.py              # Orchestrates the workflow
-├── content.py           # Fetches and summarizes news
-├── image_generator.py   # Creates themed images with AI
-├── upload.py            # Handles image uploads and server cleanup
-├── post.py              # Posts images to Instagram via Graph API
-├── agent/               # AI provider abstraction layer
-│   ├── __init__.py      # AIAgent class (provider selector)
-│   ├── ollama.py        # Local Ollama client
-│   └── openrouter.py    # OpenRouter API client
-├── resources/           # Fonts and other assets
-├── insta_news_cards/    # Generated images output directory
-└── requirements.txt     # Python dependencies
+├── server.py                    # FastAPI app + dashboard endpoints
+├── main.py                      # CLI pipeline runner
+├── backend/                     # News/image/upload/post logic
+├── frontend/                    # Dashboard UI (templates + static JS/CSS)
+├── news_video_engine/           # Embedded video generation engine
+├── insta_news_cards/            # Generated image/summaries artifacts
+└── requirements.txt             # Python dependencies
 ```
 
 ## AI Providers
