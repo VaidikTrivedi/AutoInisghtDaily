@@ -378,8 +378,43 @@ async function generateImages() {
     }
 }
 
+async function createScript() {
+    showLoading('Creating script from summaries...');
+    const resultEl = document.getElementById('scriptResult');
+    const previewEl = document.getElementById('scriptPreview');
+    const scriptText = document.getElementById('scriptText');
+    if (resultEl) resultEl.textContent = '';
+    if (previewEl) previewEl.style.display = 'none';
+
+    try {
+        const scriptData = await apiCall('/api/script/generate', { method: 'POST' });
+        
+        if (!scriptData.script) {
+            throw new Error('No script returned from API');
+        }
+
+        if (resultEl) {
+            resultEl.innerHTML = `✅ Script created from ${scriptData.items} summaries`;
+        }
+        
+        if (scriptText) {
+            scriptText.textContent = scriptData.script;
+            previewEl.style.display = 'block';
+        }
+
+        showToast('Script created successfully', 'success');
+        refreshActivity();
+    } catch (e) {
+        console.error(e);
+        if (resultEl) resultEl.innerHTML = `❌ Error: ${e.message || 'Failed to create script'}`;
+        showToast('Failed to create script', 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
 async function generateVideo() {
-    showLoading('Generating script...');
+    showLoading('Generating video from all summaries...');
     const resultEl = document.getElementById('videoGenerateResult');
     const voiceInput = document.getElementById('videoVoiceName');
     const voiceName = (voiceInput?.value || 'en-US-JennyNeural-Female').trim() || 'en-US-JennyNeural-Female';

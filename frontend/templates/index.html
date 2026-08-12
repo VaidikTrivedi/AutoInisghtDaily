@@ -247,8 +247,21 @@
             </div>
 
             <div class="card">
-                <h3><i class="fas fa-film"></i> Create Video from Summaries</h3>
-                <p style="color: var(--text-secondary); margin-bottom: 12px;">Uses current summaries and runs the embedded MoneyPrinterTurbo flow.</p>
+                <h3><i class="fas fa-scroll"></i> Create Script</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 12px;">Generate narration script from all summaries.</p>
+                <button class="btn btn-primary" onclick="createScript()">
+                    <i class="fas fa-wand-magic-sparkles"></i> Create Script
+                </button>
+                <div id="scriptResult" style="margin-top: 12px; color: var(--text-secondary);"></div>
+                <div id="scriptPreview" style="margin-top: 12px; padding: 12px; background: var(--bg-secondary); border-radius: 8px; display: none; max-height: 200px; overflow-y: auto;">
+                    <h4>Generated Script:</h4>
+                    <p id="scriptText" style="margin: 0; font-size: 0.9em; line-height: 1.5;"></p>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3><i class="fas fa-film"></i> Generate Video</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 12px;">Creates one video narrating all summaries.</p>
                 <div class="setting-item" style="margin-bottom: 12px;">
                     <label for="videoVoiceName">Voice Name</label>
                     <select id="videoVoiceName">
